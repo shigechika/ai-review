@@ -9,10 +9,14 @@ cd "$(dirname "${BASH_SOURCE[0]}")"
 
 extract_between 'merged=$(jq -n -c' "2>/dev/null || true)" | extract_quoted > /tmp/merge.jq
 extract_between 'LEDGER_RESULT=$(jq -n -c' "2>/dev/null || true)" | extract_quoted > /tmp/cap.jq
+extract_between '# ---------- Render the visible review body ----------' 'kept.txt > rendered.md || true' \
+  | extract_quoted > /tmp/render.awk
 [ -s /tmp/merge.jq ] || { echo "FAIL: could not extract the merge jq program"; exit 1; }
 [ -s /tmp/cap.jq ] || { echo "FAIL: could not extract the cap/ledger-result jq program"; exit 1; }
-t "merge.jq has no apostrophes" "0" "$(grep -c "'" /tmp/merge.jq)"
-t "cap.jq has no apostrophes"   "0" "$(grep -c "'" /tmp/cap.jq)"
+[ -s /tmp/render.awk ] || { echo "FAIL: could not extract the render-step awk program"; exit 1; }
+t "merge.jq has no apostrophes"  "0" "$(grep -c "'" /tmp/merge.jq)"
+t "cap.jq has no apostrophes"    "0" "$(grep -c "'" /tmp/cap.jq)"
+t "render.awk has no apostrophes" "0" "$(grep -c "'" /tmp/render.awk)"
 
 run_merge() { # old model emitted round
   jq -n -c --argjson old "$1" --argjson model "$2" --argjson emitted "$3" --arg round "$4" "$(cat /tmp/merge.jq)"
@@ -106,5 +110,37 @@ t "engine: verdict reads FINAL_FINDINGS" "yes" \
   "$(grep -A2 -F '# ---------- Verdict ----------' "$ENGINE" | grep -qF 'kept.txt' && echo no || echo yes)"
 t "engine: blocking_n is computed from FINAL_FINDINGS" "yes" \
   "$(grep -qF 'blocking_n=$(printf '"'"'%s'"'"' "$FINAL_FINDINGS"' "$ENGINE" && echo yes || echo no)"
+
+# ---------- Render-step severity handling ----------
+# Regression coverage for a bug found and fixed in one pass: the render
+# step used to strip EVERY severity line unconditionally, so a malformed
+# one (a typo, an empty value) rendered identically to an ordinary,
+# cleanly-classified advisory finding — the reader had no way to tell the
+# model emitted something unparseable. The fix must (a) still silently
+# drop a cleanly-classified line, case-INsensitively — same normalization
+# normsev already applies elsewhere in this file — since a case-sensitive
+# check here would let e.g. "severity: Blocking" count as blocking in the
+# ledger while rendering as a "treated as advisory" note, contradicting
+# the verdict line right above it in the same comment; (b) surface
+# anything else with a bounded, visible marker.
+render_kept() { printf '%s\n' "$1" | awk -f /tmp/render.awk; }
+
+t "render: clean lowercase severity is dropped silently" \
+  "0" "$(render_kept $'===FINDING R1F1===\nfoo\nseverity: blocking\nbar\n===END FINDING===' | grep -c 'malformed severity')"
+t "render: clean severity is case-insensitive (Blocking)" \
+  "0" "$(render_kept $'===FINDING R1F1===\nfoo\nseverity: Blocking\nbar\n===END FINDING===' | grep -c 'malformed severity')"
+t "render: clean severity is case-insensitive (ADVISORY)" \
+  "0" "$(render_kept $'===FINDING R1F1===\nfoo\nseverity: ADVISORY\nbar\n===END FINDING===' | grep -c 'malformed severity')"
+t "render: mistyped severity is surfaced" \
+  "1" "$(render_kept $'===FINDING R1F1===\nfoo\nseverity: blockingish\n===END FINDING===' | grep -c 'malformed severity')"
+t "render: empty severity value is surfaced" \
+  "1" "$(render_kept $'===FINDING R1F1===\nfoo\nseverity: \n===END FINDING===' | grep -c '(empty)')"
+t "render: a finding block missing the severity line entirely stays unmarked" \
+  "0" "$(render_kept $'===FINDING R1F1===\nno severity line at all\n===END FINDING===' | grep -c 'malformed severity')"
+long_val=$(python3 -c "print('x' * 250)")
+t "render: an over-length malformed value is capped at 200 chars + ellipsis" \
+  "203" "$(render_kept "===FINDING R1F1===
+severity: $long_val
+===END FINDING===" | grep -o 'x*\.\.\.' | head -1 | tr -d '\n' | wc -c | tr -d ' ')"
 
 t_summary

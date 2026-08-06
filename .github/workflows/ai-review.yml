@@ -1103,9 +1103,32 @@ jobs:
             awk '
               /^===FINDING / { id = $2; sub(/=+$/, "", id); printf "**%s** — ", id; next }
               /^===END FINDING===/ { print ""; next }
-              # The severity line drives the verdict below; showing it inside
-              # the prose as well is just noise.
-              /^[[:space:]]*severity:[[:space:]]*/ { next }
+              # A cleanly-classified severity line drives the verdict below;
+              # showing it inside the prose as well is just noise, so drop
+              # it. Case-insensitive (tolower) to match the normsev
+              # normalization the ledger merge uses below (ascii_downcase +
+              # IN(blocking, advisory)) — a case-sensitive check here would let
+              # e.g. "severity: Blocking" count as blocking in the ledger
+              # while rendering as an unclassified/malformed note, directly
+              # contradicting the verdict line above it in the same comment.
+              tolower($0) ~ /^[[:space:]]*severity:[[:space:]]*(blocking|advisory)[[:space:]]*$/ { next }
+              # Anything else (empty, mistyped — a block with no severity
+              # line at all never reaches this rule, so it still renders
+              # unmarked) is normalized to advisory by the same ledger merge
+              # rule, but silently dropping it here would hide from the
+              # reader *why* — it would render identically to an ordinary,
+              # cleanly-classified advisory finding. Surface it instead.
+              /^[[:space:]]*severity:[[:space:]]*/ {
+                val = $0
+                sub(/^[[:space:]]*severity:[[:space:]]*/, "", val)
+                # Model output is untrusted; bound the echoed value the same
+                # way the ledger summary field is capped elsewhere in this
+                # file (200 chars), so a degenerate response cannot inflate
+                # the rendered comment.
+                if (length(val) > 200) val = substr(val, 1, 200) "..."
+                printf "_(malformed severity %s — treated as advisory)_\n", (val == "" ? "(empty)" : "\"" val "\"")
+                next
+              }
               { print }
             ' kept.txt > rendered.md || true
           elif [ -n "$ids" ]; then
