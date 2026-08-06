@@ -122,8 +122,12 @@ deployment が `reasoning_effort` を HTTP 400 で拒否した場合、エンジ
 
 ## バージョニング
 
+- リリースは **release-please** が切ります: Conventional Commits を
+  `main` にマージすると release PR が開くので、それをマージすると
+  `vX.Y.Z` タグ・GitHub Release・changelog が発行されます。
 - `v1` は**移動タグ**です: `@v1` にピンした caller にはエンジンの修正が
-  自動で届きます。インターフェースの破壊的変更ではメジャーを上げます。
+  自動で届きます（リリースワークフローが毎リリースで動かします）。
+  インターフェースの破壊的変更ではメジャーを上げます。
 - ピン留め・ロールバック用に不変の `vX.Y.Z` タグがあります
   （`git tag -f v1 <last-good>` で全 caller を一括ロールバック）。
 - **このリポジトリは public を維持する必要があります** — reusable

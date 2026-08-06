@@ -1,0 +1,43 @@
+name: release-please
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: googleapis/release-please-action@v5
+        id: rp
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+      # Callers pin the MOVING major tag (uses: ...@v1), so every release
+      # must drag it along — a release that only mints vX.Y.Z ships to
+      # nobody. Done here in the same job rather than in a separate
+      # `on: release` workflow because releases created with GITHUB_TOKEN
+      # cannot trigger other workflows (GitHub's recursion-prevention
+      # rule), which would leave the major tag stuck on the old release.
+      - uses: actions/checkout@v5
+        if: ${{ steps.rp.outputs.release_created }}
+        with:
+          fetch-depth: 0
+      - name: Move the major tag to the new release
+        if: ${{ steps.rp.outputs.release_created }}
+        env:
+          TAG: ${{ steps.rp.outputs.tag_name }}
+        run: |
+          case "$TAG" in
+            v[0-9]*.*) ;;
+            *) echo "::warning::unexpected tag '$TAG' — not moving a major tag"; exit 0 ;;
+          esac
+          major=${TAG%%.*}
+          git tag -f "$major" "$TAG"
+          git push -f origin "$major"

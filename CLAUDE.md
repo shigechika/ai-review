@@ -59,6 +59,15 @@ engine ships to all of them at once — treat edits accordingly.
   run log — they are the observability surface.
 - Keep `README.md` (English) and `README.ja.md` (Japanese) in sync.
 
+## Releasing
+
+Releases go through **release-please** (`release-type: simple`;
+`version.txt` + `CHANGELOG.md` are its managed files). Never hand-tag
+`vX.Y.Z`: merge Conventional Commits to `main`, then merge the release PR.
+The release-please workflow also force-moves the major tag (`v1`) to each
+new release — that step is what actually ships to callers, since they pin
+the moving tag.
+
 ## Secrets
 
 `AI_REVIEW_ENDPOINT` / `AI_REVIEW_API_KEY` are repository secrets. The
