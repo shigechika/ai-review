@@ -39,6 +39,11 @@ engine ships to all of them at once — treat edits accordingly.
 - The system/verifier prompts and the large jq programs live inside
   single-quoted shell strings: **no apostrophes** inside them (including
   comments inside the jq programs) — an apostrophe ends the string.
+  `tests/test_ledger.sh` asserts the extracted jq programs contain zero
+  apostrophes; this rule has been violated twice DESPITE being documented
+  here, both times caught only by that assertion (or by `actionlint`'s
+  shellcheck integration) — do not trust memory or review alone for this
+  one, run the tests.
 - Byte caps are named in one block ("Byte caps") — change budgets there,
   and keep the header comment's arithmetic in sync.
 - Truncation must be labelled: a clamped attachment gets the `TRUNCATED`
@@ -51,6 +56,15 @@ engine ships to all of them at once — treat edits accordingly.
 
 ## Verifying changes
 
+- `bash tests/run_all.sh` — the engine's own regression suite. Extracts
+  the deny-list case block, delta-detection logic, and the ledger
+  merge/cap/verdict jq programs **directly from the current YAML** (not
+  retyped), so a behavioral change fails the suite instead of silently
+  diverging from it. Run this before every PR; CI runs it too
+  (`unit-tests` job in `ci.yml`). Add a case to the relevant `test_*.sh`
+  for every bug this engine's own selftest finds in itself — that is how
+  the severity-corroboration regression (found on PR #9's own selftest)
+  became a permanent test instead of a one-off fix.
 - `actionlint` at the repo root (CI runs it with shellcheck available).
 - Extract the run block from the YAML and `bash -n` it.
 - The selftest workflow reviews every PR with the PR's **own** engine
