@@ -1105,32 +1105,37 @@ jobs:
               /^===END FINDING===/ { print ""; next }
               # A cleanly-classified severity line drives the verdict below;
               # showing it inside the prose as well is just noise, so drop
-              # it. Case-insensitive (tolower) to match the normsev
-              # normalization the ledger merge uses below (ascii_downcase +
-              # IN(blocking, advisory)) — a case-sensitive check here would let
-              # e.g. "severity: Blocking" count as blocking in the ledger
-              # while rendering as an unclassified/malformed note, directly
-              # contradicting the verdict line above it in the same comment.
+              # it. Case-insensitive on the whole line (key and value): the
+              # ledger merge normalizes the value the same way (see
+              # ascii_downcase in normsev below) — a case-sensitive check
+              # here would let e.g. "severity: Blocking" (or a capitalized
+              # "Severity:" key) count as blocking in the ledger while
+              # rendering as an unclassified/malformed note, contradicting
+              # the verdict line above it in the same comment.
               tolower($0) ~ /^[[:space:]]*severity:[[:space:]]*(blocking|advisory)[[:space:]]*$/ { next }
-              # Anything else (empty, mistyped — a block with no severity
-              # line at all never reaches this rule, so it still renders
-              # unmarked) is normalized to advisory by the same ledger merge
-              # rule, but silently dropping it here would hide from the
-              # reader *why* — it would render identically to an ordinary,
-              # cleanly-classified advisory finding. Surface it instead.
-              /^[[:space:]]*severity:[[:space:]]*/ {
+              # Anything else with a severity key, case-insensitive (empty,
+              # mistyped — a block with no severity line at all never
+              # reaches this rule, so it still renders unmarked) is
+              # normalized to advisory by the same ledger merge rule, but
+              # silently dropping it here would hide from the reader why —
+              # it would render identically to an ordinary, cleanly-
+              # classified advisory finding. Surface it instead.
+              tolower($0) ~ /^[[:space:]]*severity:[[:space:]]*/ {
                 val = $0
-                sub(/^[[:space:]]*severity:[[:space:]]*/, "", val)
+                sub(/^[[:space:]]*[Ss][Ee][Vv][Ee][Rr][Ii][Tt][Yy]:[[:space:]]*/, "", val)
                 # Model output is untrusted; bound the echoed value the same
                 # way the ledger summary field is capped elsewhere in this
-                # file (200 chars), so a degenerate response cannot inflate
-                # the rendered comment.
+                # file (200 chars). Truncating with byte-oriented substr()
+                # can split a multibyte (ja) character mid-codepoint — the
+                # trailing iconv -c below (same idiom used elsewhere in this
+                # file for the same reason) drops a torn tail instead of
+                # emitting invalid UTF-8 into the rendered comment.
                 if (length(val) > 200) val = substr(val, 1, 200) "..."
                 printf "_(malformed severity %s — treated as advisory)_\n", (val == "" ? "(empty)" : "\"" val "\"")
                 next
               }
               { print }
-            ' kept.txt > rendered.md || true
+            ' kept.txt | iconv -f UTF-8 -t UTF-8 -c 2>/dev/null > rendered.md || true
           elif [ -n "$ids" ]; then
             echo "All candidate findings this round were refuted by the verifier pass — no new findings." > rendered.md
           elif grep -qi "no findings clear the reporting bar" review_body.txt 2>/dev/null; then
@@ -1189,8 +1194,18 @@ jobs:
               and ((.id? | type) == "string") and (.id != "")
               and ((.summary? | type) == "string")
               and ((.status? // "") | IN("open", "fixed", "dismissed"))));
+            # Case-insensitive (ascii_downcase) to match the render step
+            # (tolower) and the kept_json/dropped_json fallback parsers
+            # below, which already normalize this way — a case-sensitive
+            # check here let a model-emitted "severity: Blocking" silently
+            # downgrade to advisory with no visible signal (the render step
+            # would show it as cleanly-classified, since case-insensitive
+            # matching there disagreed with a case-sensitive check here;
+            # found reviewing #17, the render-step fix for this exact class
+            # of silent-downgrade bug).
             def normsev: (.severity? // "advisory") as $s
-              | if ($s | type) == "string" and ($s | IN("blocking", "advisory")) then $s else "advisory" end;
+              | if ($s | type) == "string" and ($s | ascii_downcase | IN("blocking", "advisory"))
+                then ($s | ascii_downcase) else "advisory" end;
             ($model | valid) as $m
             | ($old | valid) as $o
             | ($o | map(.id)) as $known
@@ -1216,8 +1231,8 @@ jobs:
                        # by this workflow reviewing its own change).
                        | ($f.id as $i | $emitted | index($i)) as $corroborated
                        | ($f + {status: $u.status,
-                                severity: (if $corroborated and ($us | type) == "string" and ($us | IN("blocking", "advisory"))
-                                           then $us else $fsev end)})
+                                severity: (if $corroborated and ($us | type) == "string" and ($us | ascii_downcase | IN("blocking", "advisory"))
+                                           then ($us | ascii_downcase) else $fsev end)})
                   end))
               + [$m[] | select((.id as $i | $known | index($i) | not)
                                and (.id as $i | $emitted | index($i))
