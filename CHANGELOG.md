@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.1](https://github.com/shigechika/ai-review/compare/v1.1.0...v1.1.1) (2026-08-06)
+
+
+### Bug Fixes
+
+* verdict was blind to persisted open findings' severity across rounds ([#9](https://github.com/shigechika/ai-review/issues/9)) ([62eeccc](https://github.com/shigechika/ai-review/commit/62eeccc305f08fddcad792a9883288e41482c2c7))
+
 ## [1.1.0](https://github.com/shigechika/ai-review/compare/v1.0.0...v1.1.0) (2026-08-06)
 
 
