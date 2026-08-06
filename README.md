@@ -27,8 +27,12 @@ engine:
    carries per-finding status (`open`/`fixed`/`dismissed`) across rounds —
    settled points are never re-argued.
 5. On later pushes, reviews only the **new commits** (delta rounds via the
-   compare API), skips docs-only pushes, and degrades safely to a full-diff
-   round whenever the delta is incomplete.
+   compare API), skips docs-only pushes to code PRs, and degrades safely to
+   a full-diff round whenever the delta is incomplete.
+6. A **documentation-only PR** switches to docs-mode: documentation
+   accuracy becomes the review subject, and source files the docs cite are
+   attached (at the PR head) as evidence, so claims about signatures,
+   defaults or behavior are checked against the code.
 
 The review is **advisory only**: every failure path soft-fails, so this job
 can never block a PR.
