@@ -144,3 +144,9 @@ the short version:
 ## License
 
 [MIT](LICENSE)
+
+## Scratch gate section (will be reverted before merge — PR is closed unmerged)
+
+The default reviewer reasoning effort configured in
+`.github/workflows/ai-review.yml` is `low`, and the engine reports up to
+10 findings per round.
