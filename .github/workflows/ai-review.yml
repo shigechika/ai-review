@@ -1177,8 +1177,23 @@ jobs:
                 | if $u == null or ($f.status | IN("fixed", "dismissed"))
                   then ($f + {severity: $fsev})
                   else ($u.severity?) as $us
+                       # Status may transition (typically to fixed/dismissed)
+                       # from the ledger digest alone — the model is not
+                       # required to re-emit a finding block just to settle
+                       # an old one, that IS the point of the digest. Severity
+                       # is different: an open entry keeps ITS OWN severity
+                       # unless the response for this round also contains an
+                       # actual finding block for that id (id in $emitted).
+                       # Without that corroboration gate, an unargued ledger
+                       # line downgrading severity (model carelessness, or a
+                       # prompt-injected diff trying to suppress a real
+                       # blocking finding) would silently erase it from the
+                       # verdict — the same failure class this whole change
+                       # exists to close, just moved one layer deeper (found
+                       # by this workflow reviewing its own change).
+                       | ($f.id as $i | $emitted | index($i)) as $corroborated
                        | ($f + {status: $u.status,
-                                severity: (if ($us | type) == "string" and ($us | IN("blocking", "advisory"))
+                                severity: (if $corroborated and ($us | type) == "string" and ($us | IN("blocking", "advisory"))
                                            then $us else $fsev end)})
                   end))
               + [$m[] | select((.id as $i | $known | index($i) | not)
