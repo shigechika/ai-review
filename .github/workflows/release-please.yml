@@ -12,11 +12,27 @@ permissions:
 jobs:
   release-please:
     runs-on: ubuntu-latest
+    # Run release-please in JST so the CHANGELOG entry date matches the
+    # JST merge day rather than the runner's UTC clock. release-please
+    # formats the version-header date via `new Date().toLocaleDateString('en-CA')`
+    # (changelog-notes/github.ts), which respects the TZ environment variable.
+    env:
+      TZ: Asia/Tokyo
     steps:
       - uses: googleapis/release-please-action@v5
         id: rp
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          # A fine-grained PAT lets the tag and Release created by
+          # release-please trigger downstream workflows. Tokens attributed
+          # to GITHUB_TOKEN cannot fire other workflow runs (GitHub's
+          # recursion-prevention rule). This repo currently has no
+          # on-release workflow — the one thing that must follow a release,
+          # moving the major tag, runs inside this job below precisely so
+          # it works without the PAT — but the fallback keeps parity with
+          # the other repositories and future-proofs a downstream pipeline.
+          # The secret's repo scope needs Contents + Pull requests +
+          # Metadata at minimum. Falls back to GITHUB_TOKEN when unset.
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
       # Callers pin the MOVING major tag (uses: ...@v1), so every release
