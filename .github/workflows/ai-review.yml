@@ -873,9 +873,11 @@ jobs:
           No findings clear the reporting bar this round.
           Always end with the updated ledger (every prior entry with its
           updated status, plus one open entry per new finding; summaries
-          under 20 words):
+          under 20 words). Carry severity forward for every entry — an
+          existing entry keeps its severity unless this finding block
+          changed it; a new entry uses the severity from its finding block:
           ===LEDGER===
-          [{"id":"R1F1","summary":"...","status":"open|fixed|dismissed"}]
+          [{"id":"R1F1","summary":"...","status":"open|fixed|dismissed","severity":"blocking|advisory"}]
           ===END LEDGER===
           Output nothing after the ledger block.'
 
@@ -1151,40 +1153,67 @@ jobs:
           emitted_json=$(printf '%s\n' "$ids" \
             | jq -R -s 'split("\n") | map(select(length > 0))' 2>/dev/null || true)
           if [ -z "$emitted_json" ]; then emitted_json='[]'; fi
+          # Severity now rides in the ledger too (previously only id/summary/
+          # status), because the verdict below has to be computed from the
+          # FULL open set, not just this round's findings — see the verdict
+          # section for why. normsev tolerates a missing/invalid severity
+          # (older ledger states pre-date this field; a model that drops it)
+          # by defaulting to advisory, the same "when torn, choose advisory"
+          # rule the reporting-bar instructions already use.
           merged=$(jq -n -c --argjson old "$OLD_FINDINGS" --argjson model "$MODEL_FINDINGS" \
                       --argjson emitted "$emitted_json" --arg round "$ROUND" '
             def valid: map(select(type == "object"
               and ((.id? | type) == "string") and (.id != "")
               and ((.summary? | type) == "string")
               and ((.status? // "") | IN("open", "fixed", "dismissed"))));
+            def normsev: (.severity? // "advisory") as $s
+              | if ($s | type) == "string" and ($s | IN("blocking", "advisory")) then $s else "advisory" end;
             ($model | valid) as $m
             | ($old | valid) as $o
             | ($o | map(.id)) as $known
             | ($o | map(. as $f
                 | ([$m[] | select(.id == $f.id)] | first) as $u
-                | if $u == null or ($f.status | IN("fixed", "dismissed")) then $f
-                  else $f + {status: $u.status} end))
+                | ($f | normsev) as $fsev
+                | if $u == null or ($f.status | IN("fixed", "dismissed"))
+                  then ($f + {severity: $fsev})
+                  else ($u.severity?) as $us
+                       | ($f + {status: $u.status,
+                                severity: (if ($us | type) == "string" and ($us | IN("blocking", "advisory"))
+                                           then $us else $fsev end)})
+                  end))
               + [$m[] | select((.id as $i | $known | index($i) | not)
                                and (.id as $i | $emitted | index($i))
-                               and (.id | test("^R" + $round + "F[0-9]+$")))]
+                               and (.id | test("^R" + $round + "F[0-9]+$")))
+                 | . + {severity: (. | normsev)}]
           ' 2>/dev/null || true)
           if [ -z "$merged" ]; then merged="$OLD_FINDINGS"; fi
 
           # Defensive supplements built from the finding blocks themselves,
           # so a malformed model ledger cannot lose this round: kept
-          # findings enter as open, verifier-dropped ones as dismissed.
+          # findings enter as open, verifier-dropped ones as dismissed. The
+          # severity line is the block's second line (after the file:line
+          # summary) — parsed here too so these supplements can carry it
+          # the same as the model's own ledger does.
           kept_json=$(awk '
-            /^===FINDING / { id = $2; sub(/=+$/, "", id); getline s; printf "%s\t%s\n", id, s }
+            /^===FINDING / { id = $2; sub(/=+$/, "", id); getline s; getline sv
+              sub(/^[[:space:]]*severity:[[:space:]]*/, "", sv); gsub(/[[:space:]]+$/, "", sv)
+              printf "%s\t%s\t%s\n", id, sv, s }
           ' kept.txt 2>/dev/null \
             | jq -R -s 'split("\n") | map(select(length > 0) | split("\t")
-                        | {id: .[0], summary: ((.[1:] | join(" "))[0:200]), status: "open"})' 2>/dev/null || true)
+                        | {id: .[0],
+                           severity: ((.[1] // "") | ascii_downcase | if IN("blocking", "advisory") then . else "advisory" end),
+                           summary: ((.[2:] | join(" "))[0:200]), status: "open"})' 2>/dev/null || true)
           if [ -z "$kept_json" ]; then kept_json='[]'; fi
           dropped_json=$(awk -v list="$DROPPED_IDS" '
             BEGIN { n = split(list, a, ","); for (i = 1; i <= n; i++) if (a[i] != "") d[a[i]] = 1 }
-            /^===FINDING / { id = $2; sub(/=+$/, "", id); if (toupper(id) in d) { getline s; printf "%s\t%s\n", id, s } }
+            /^===FINDING / { id = $2; sub(/=+$/, "", id); if (toupper(id) in d) { getline s; getline sv
+              sub(/^[[:space:]]*severity:[[:space:]]*/, "", sv); gsub(/[[:space:]]+$/, "", sv)
+              printf "%s\t%s\t%s\n", id, sv, s } }
           ' review_body.txt 2>/dev/null \
             | jq -R -s 'split("\n") | map(select(length > 0) | split("\t")
-                        | {id: .[0], summary: ((.[1:] | join(" "))[0:200]), status: "dismissed"})' 2>/dev/null || true)
+                        | {id: .[0],
+                           severity: ((.[1] // "") | ascii_downcase | if IN("blocking", "advisory") then . else "advisory" end),
+                           summary: ((.[2:] | join(" "))[0:200]), status: "dismissed"})' 2>/dev/null || true)
           if [ -z "$dropped_json" ]; then dropped_json='[]'; fi
 
           LEDGER_RESULT=$(jq -n -c --argjson base "$merged" --argjson old "$OLD_FINDINGS" \
@@ -1293,21 +1322,28 @@ jobs:
           # a merge blocker and the PR churns. Counting the severities into a
           # one-line verdict makes the threshold explicit: blocking findings
           # are the ones worth another round, advisory ones are worth an
-          # issue. Severity is model-supplied, so an unparseable or missing
-          # line counts as advisory rather than inventing a blocker.
-          # Counted from kept.txt (post-verifier, pre-render): rendered.md has
-          # already rewritten the block markers and dropped the severity line.
-          blocking_n=$(grep -ciE '^[[:space:]]*severity:[[:space:]]*blocking[[:space:]]*$' kept.txt 2>/dev/null || true)
-          case "$blocking_n" in ''|*[!0-9]*) blocking_n=0 ;; esac
-          advisory_n=$(grep -ciE '^[[:space:]]*severity:[[:space:]]*advisory[[:space:]]*$' kept.txt 2>/dev/null || true)
-          case "$advisory_n" in ''|*[!0-9]*) advisory_n=0 ;; esac
-          finding_n=$(grep -c '^===FINDING ' kept.txt 2>/dev/null || true)
-          case "$finding_n" in ''|*[!0-9]*) finding_n=0 ;; esac
-          # A severity line matching neither anchored pattern (missing,
-          # malformed, a typo) still counts as advisory rather than
+          # issue.
+          #
+          # Counted from FINAL_FINDINGS (the merged, post-cap ledger) —
+          # NOT from kept.txt, which holds only THIS round's candidates.
+          # A round that finds nothing new used to report blocking_n=0
+          # unconditionally, even with a still-open blocking finding from
+          # an earlier round sitting in the ledger: the visible verdict on
+          # a delta round said "no blocking findings" while a genuine
+          # blocking issue remained unresolved underneath a collapsed
+          # ledger entry (found in production on a real fleet PR — round 2
+          # showed a clean verdict while two round-1 findings, one
+          # security-flavored, sat open and effectively invisible).
+          # Every open entry carries a severity now (see the ledger merge
+          # above); an entry lacking one counts as advisory rather than
           # inventing a blocker.
-          unclassified_n=$((finding_n - blocking_n - advisory_n))
-          [ "$unclassified_n" -gt 0 ] && advisory_n=$((advisory_n + unclassified_n))
+          blocking_n=$(printf '%s' "$FINAL_FINDINGS" \
+            | jq -r '[.[] | select(.status == "open" and .severity == "blocking")] | length' 2>/dev/null || true)
+          case "$blocking_n" in ''|*[!0-9]*) blocking_n=0 ;; esac
+          advisory_n=$(printf '%s' "$FINAL_FINDINGS" \
+            | jq -r '[.[] | select(.status == "open" and .severity != "blocking")] | length' 2>/dev/null || true)
+          case "$advisory_n" in ''|*[!0-9]*) advisory_n=0 ;; esac
+          finding_n=$((blocking_n + advisory_n))
           if [ "$blocking_n" -gt 0 ]; then
             VERDICT="**Verdict: changes requested** — ${blocking_n} blocking, ${advisory_n} advisory."
           elif [ "$finding_n" -gt 0 ]; then
@@ -1331,11 +1367,29 @@ jobs:
             echo
             cat rendered.md
             echo
+            # A finding still open from an EARLIER round (not one this
+            # round's rendered.md already prose'd out above) is otherwise
+            # only visible as a one-line entry inside the collapsed ledger
+            # <details> below — easy to miss, and the reason the verdict
+            # above used to look clean while a real issue sat unresolved
+            # (see the Verdict section comment). Filtered to ids that were
+            # ALREADY open in OLD_FINDINGS, so this never repeats what
+            # rendered.md just said about a brand-new finding.
+            carried_open=$(printf '%s' "$FINAL_FINDINGS" | jq -r --argjson old "$OLD_FINDINGS" '
+              ($old | map(select(.status == "open") | .id)) as $oldopen
+              | [.[] | select(.status == "open" and (.id as $i | $oldopen | index($i)))]
+              | .[] | "- **\(.id)** [\(.severity // "advisory")] \(.summary)"
+            ' 2>/dev/null || true)
+            if [ -n "$carried_open" ]; then
+              echo "**Still open from earlier rounds:**"
+              printf '%s\n' "$carried_open"
+              echo
+            fi
             if [ "$FINAL_FINDINGS" != "[]" ]; then
               echo "<details><summary>Findings ledger (all rounds)</summary>"
               echo
               printf '%s' "$FINAL_FINDINGS" \
-                | jq -r '.[] | "- **\(.id)** [\(.status)] — \(.summary)"' 2>/dev/null || true
+                | jq -r '.[] | "- **\(.id)** [\(.status)/\(.severity // "advisory")] — \(.summary)"' 2>/dev/null || true
               echo
               echo "</details>"
               echo
