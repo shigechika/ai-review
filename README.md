@@ -78,6 +78,31 @@ can never block a PR.
 That's it. Draft PRs, `release-please--*` branches and Dependabot PRs are
 skipped by the engine itself.
 
+## Verifying your setup
+
+Open any real (non-draft, non-dependabot) pull request and check the
+`review` job's log:
+
+- `::notice::guidance <file>: sent N of M bytes` — appears once per
+  guidance file present in your repository. Missing entirely means the
+  engine found no `CLAUDE.md`/`AGENTS.md`/`.github/copilot-instructions.md`
+  at the base revision, which is normal if you have none.
+- `::notice::ai-review context: docs_mode=… delta_mode=… diff=…B …` — one
+  line summarizing what was actually sent to the model. `diff=0B` or a
+  missing line means the diff fetch failed; a missing sticky comment on
+  the PR with no `::warning::` in the log points at a `gh api` permission
+  problem instead.
+- `::warning::AI_REVIEW_ENDPOINT / AI_REVIEW_API_KEY not set — skipping AI
+  review` means exactly what it says — the two secrets below are missing
+  or empty on this repository (or this is a fork PR, which never gets
+  secrets by design).
+
+Every failure path is a `::warning::` with no other visible effect
+(advisory-only design) — there is no separate health-check endpoint or
+workflow. If you operate many repositories on this engine, the reliable
+signal is the same one your reviewers already see: did the sticky comment
+land on your last few real PRs.
+
 ## Configuration
 
 Everything is optional. Each setting resolves as

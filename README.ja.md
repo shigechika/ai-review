@@ -75,6 +75,30 @@ PR ごと（caller が `synchronize` を有効にしていれば push ごと）�
 これだけです。Draft PR・`release-please--*` ブランチ・Dependabot の PR は
 エンジン側でスキップされます。
 
+## 動作確認
+
+実際の（draft でも dependabot でもない）PR を開き、`review` ジョブのログを
+確認してください:
+
+- `::notice::guidance <file>: sent N of M bytes` — リポジトリに存在する
+  ガイダンスファイルごとに1行出ます。まったく出ない場合は BASE リビジョンに
+  `CLAUDE.md`/`AGENTS.md`/`.github/copilot-instructions.md` が無いということ
+  で、それ自体は正常です。
+- `::notice::ai-review context: docs_mode=… delta_mode=… diff=…B …` — 実際に
+  モデルへ送った内容の要約が1行出ます。`diff=0B` やこの行自体が無い場合は
+  diff 取得に失敗しています。`::warning::` が出ていないのに sticky コメント
+  が付かない場合は `gh api` の権限不足が疑われます。
+- `::warning::AI_REVIEW_ENDPOINT / AI_REVIEW_API_KEY not set — skipping AI
+  review` はそのまま、リポジトリに2つの secrets が未設定（または空）である
+  ことを意味します（fork PR は設計上 secrets を受け取らないため常にこれに
+  該当します）。
+
+すべての失敗経路は `::warning::` を出すだけで他に見える影響を残しません
+（アドバイザリ専用設計）— 専用のヘルスチェック用エンドポイントやワークフロー
+は別途ありません。複数リポジトリでこのエンジンを運用している場合、信頼できる
+シグナルはレビュアー自身が見ているものと同じです: 直近の実 PR に sticky
+コメントが付いたかどうかです。
+
 ## 設定
 
 すべて任意です。各設定は
