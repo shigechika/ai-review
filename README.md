@@ -125,8 +125,12 @@ the short version:
 
 ## Versioning
 
+- Releases are cut by **release-please**: merge Conventional Commits to
+  `main`, then merge the release PR it opens — that mints `vX.Y.Z`, a
+  GitHub Release, and the changelog.
 - `v1` is a **moving tag**: callers pinned to `@v1` get engine fixes
-  automatically. Breaking interface changes bump the major.
+  automatically (the release workflow moves it on every release).
+  Breaking interface changes bump the major.
 - Immutable `vX.Y.Z` tags exist for pinning and for rollback
   (`git tag -f v1 <last-good>` rolls back every caller at once).
 - **This repository must stay public** — GitHub can only resolve a
