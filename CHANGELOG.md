@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.2](https://github.com/shigechika/ai-review/compare/v1.1.1...v1.1.2) (2026-08-06)
+
+
+### Bug Fixes
+
+* severity-aware eviction in the 80-entry ledger cap ([#11](https://github.com/shigechika/ai-review/issues/11)) ([db50697](https://github.com/shigechika/ai-review/commit/db5069745450f475dc223c834f09125144448e60))
+
 ## [1.1.1](https://github.com/shigechika/ai-review/compare/v1.1.0...v1.1.1) (2026-08-06)
 
 
