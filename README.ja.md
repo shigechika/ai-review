@@ -39,8 +39,10 @@ PR ごと（caller が `synchronize` を有効にしていれば push ごと）�
    | `AI_REVIEW_ENDPOINT` | リソースルート（例 `https://<resource>.services.ai.azure.com`） |
    | `AI_REVIEW_API_KEY` | そのリソースの API キー |
 
-   エンドポイントのホスト名は credential として扱ってください。エンジンは
-   ログでマスクしますが、コードやドキュメントにも書かないでください。
+   **実際の（リソース固有の）**エンドポイントホスト名は credential として
+   扱ってください。エンジンはログでマスクしますが、コード・ドキュメント・
+   issue にも書かないでください。上の `<resource>` のようなプレースホルダ
+   例は問題ありません。
 
 2. リポジトリに `.github/workflows/ai-review.yml` を作成します:
 

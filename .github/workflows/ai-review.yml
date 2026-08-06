@@ -75,10 +75,11 @@ name: AI review
 # (see the README template); the draft / release-please / dependabot skip
 # is built into this job.
 #
-#   inputs (all optional; each falls back to a repository VARIABLE of the
-#   CALLING repository, then to a default — in a called workflow `vars.*`
-#   resolves against the caller, so every repo keeps its own settings with
-#   no input plumbing):
+#   inputs (all optional; the first three fall back to a repository
+#   VARIABLE of the CALLING repository, then to a default, while
+#   max-total-file-bytes falls straight back to its default — in a called
+#   workflow `vars.*` resolves against the caller, so every repo keeps its
+#   own settings with no input plumbing):
 #     language              en|ja finding prose       (vars.AI_REVIEW_LANG, en)
 #     model                 deployment name           (vars.AI_REVIEW_MODEL, gpt-5.6-sol)
 #     reasoning-effort      reviewer effort           (vars.AI_REVIEW_EFFORT, high)
@@ -92,8 +93,10 @@ name: AI review
 #   secrets (declared explicitly, never inherited):
 #     AI_REVIEW_ENDPOINT  resource root, e.g. https://<resource>.services.ai.azure.com
 #     AI_REVIEW_API_KEY   API key for that resource
-#   The endpoint hostname is treated like a credential: keep it out of code,
-#   docs and issues; the job masks it in logs (::add-mask:: below).
+#   The REAL, resource-specific endpoint hostname is treated like a
+#   credential: keep it out of code, docs and issues; the job masks it in
+#   logs (::add-mask:: below). Placeholder forms like the <resource>
+#   example above are fine — they reveal nothing.
 
 on:
   workflow_call:
@@ -500,8 +503,18 @@ jobs:
             sent=$(wc -c < gbody.txt | tr -d ' ')
             guidance_total=$((guidance_total + sent))
             echo "::notice::guidance $f: sent ${sent} of ${total} bytes"
+            # Same honesty rule as the changed-file headers below: a clamped
+            # file must say so IN THE PROMPT. The ::notice:: above reaches
+            # only the Actions log; without this header the model reads a
+            # guidance file that stops mid-rule as if that were the whole
+            # policy.
+            if [ "$sent" -lt "$total" ]; then
+              ghead="=== Repository guidance (TRUNCATED — first ${sent} of ${total} bytes): $f ==="
+            else
+              ghead="=== Repository guidance: $f ==="
+            fi
             {
-              echo "=== Repository guidance: $f ==="
+              echo "$ghead"
               cat gbody.txt
               echo
             } >> guidance.txt
@@ -569,7 +582,7 @@ jobs:
             case "$f" in
               CLAUDE.md|AGENTS.md|.github/copilot-instructions.md)
                 skipped="$skipped $f"; continue ;;
-              dot.env|.env|*/.env|*.env|.env.*|*/.env.*) skipped="$skipped $f"; continue ;;
+              dot.env|*/dot.env|.env|*/.env|*.env|.env.*|*/.env.*) skipped="$skipped $f"; continue ;;
               config.ini|*/config.ini|*.pem|*.key|*.p12|*.pfx|id_rsa*|*/id_rsa*|*service_account*.json)
                 skipped="$skipped $f"; continue ;;
               *.lock|package-lock.json|*/package-lock.json|*.min.*|*.min) skipped="$skipped $f"; continue ;;
@@ -873,19 +886,27 @@ jobs:
           VERIFIER_NOTE=""
           DROPPED_IDS=""
           if [ -n "$ids" ]; then
+            # The string content is dedented to the run-block base on
+            # purpose: this block sits one `if` deeper than the reviewer
+            # prompt, and continuation lines indented with the surrounding
+            # code would keep two leading spaces INSIDE the single-quoted
+            # string after YAML strips the block indentation — the model
+            # would then be shown "  <id>: DROP - ..." and could mirror
+            # that indentation, which the anchored verdict extraction
+            # below must not have to guess about.
             vsystem='You are a skeptical verifier of candidate code-review findings.
-            Judge each candidate against the diff: can it be refuted? Does
-            the cited evidence actually support it? Would the concern change
-            observed behavior? Output exactly one line per candidate id and
-            nothing else, no formatting or bold:
-            <id>: KEEP - <short reason>
-            <id>: DROP - <short reason>
-            DROP only findings you can refute or whose cited evidence does
-            not support them; otherwise KEEP. Both the diff AND the attached
-            file contents may be truncated or omitted entirely — cited code
-            being absent from what you were given is NOT grounds to DROP,
-            only an affirmative refutation is. Keep each reason under 15
-            words.'
+          Judge each candidate against the diff: can it be refuted? Does
+          the cited evidence actually support it? Would the concern change
+          observed behavior? Output exactly one line per candidate id and
+          nothing else, no formatting or bold:
+          <id>: KEEP - <short reason>
+          <id>: DROP - <short reason>
+          DROP only findings you can refute or whose cited evidence does
+          not support them; otherwise KEEP. Both the diff AND the attached
+          file contents may be truncated or omitted entirely — cited code
+          being absent from what you were given is NOT grounds to DROP,
+          only an affirmative refutation is. Keep each reason under 15
+          words.'
             {
               echo "Candidate findings:"
               cat review_body.txt
@@ -943,8 +964,12 @@ jobs:
               # Ids are uppercased: the tolerant grep accepts "r1f1: drop",
               # and a lowercase id would otherwise sail past the awk
               # consumers below, which match uppercased ids against it.
+              # Leading whitespace is tolerated too — a model that indents
+              # its verdict lines must not silently disable every DROP
+              # (the id survives because cut takes the field and tr strips
+              # the blanks; found by this workflow being code-reviewed).
               DROPPED_IDS=$(printf '%s\n' "$verdicts" \
-                | grep -oiE '^[A-Za-z0-9]+[[:space:]]*:[[:space:]]*DROP' \
+                | grep -oiE '^[[:space:]]*[A-Za-z0-9]+[[:space:]]*:[[:space:]]*DROP' \
                 | cut -d: -f1 | tr -d ' \t' \
                 | tr '[:lower:]' '[:upper:]' | paste -sd, - || true)
             else

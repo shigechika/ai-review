@@ -42,8 +42,10 @@ can never block a PR.
    | `AI_REVIEW_ENDPOINT` | Resource root, e.g. `https://<resource>.services.ai.azure.com` |
    | `AI_REVIEW_API_KEY` | API key for that resource |
 
-   Treat the endpoint hostname like a credential: the engine masks it in
-   logs, and it should not appear in code or docs.
+   Treat the **real, resource-specific** endpoint hostname like a
+   credential: the engine masks it in logs, and it should not appear in
+   code, docs or issues. Placeholder forms like the `<resource>` example
+   above are fine.
 
 2. Create `.github/workflows/ai-review.yml` in your repository:
 
