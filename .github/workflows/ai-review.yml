@@ -201,6 +201,36 @@ jobs:
 
           case "$LANGUAGE" in ja) ;; *) LANGUAGE=en ;; esac
 
+          # ---------- Docs-mode detection ----------
+          # A documentation-only PR gets a different review, not a silent
+          # pass. The normal reporting bar excludes documentation accuracy
+          # (noise control for code PRs) — on a docs PR that excludes the
+          # entire review subject, so the reviewer could only ever answer
+          # "no findings" while docs contradicting the implementation sail
+          # through. Detected from the files API rather than the diff so
+          # renames count via previous_filename: a PR renaming code to *.md
+          # must NOT enter docs-mode — the code removal deserves the normal
+          # review. Fail-safe: an API error leaves DOCS_MODE=0 and the PR
+          # gets the stricter, normal review.
+          DOCS_MODE=0
+          # The exit status must gate the value: with `|| true` inside the
+          # substitution, a pagination failure on page two of a 101-file PR
+          # would leave page one (possibly all *.md) in $prfiles and switch
+          # a code-changing PR into the laxer docs review. A failed call
+          # yields the empty string instead, which keeps normal mode.
+          if ! prfiles=$(gh api "repos/$GH_REPO/pulls/$PR/files?per_page=100" --paginate \
+            --jq '.[] | .filename, (.previous_filename // empty)' 2>/dev/null); then
+            prfiles=""
+          fi
+          if [ -n "$prfiles" ]; then
+            non_md=$(printf '%s\n' "$prfiles" | grep -cv '\.md$' || true)
+            case "$non_md" in ''|*[!0-9]*) non_md=1 ;; esac
+            if [ "$non_md" -eq 0 ]; then
+              DOCS_MODE=1
+              echo "::notice::docs-mode PR (every changed path is *.md) — documentation is the review subject; source files the docs cite are attached as evidence"
+            fi
+          fi
+
           # ---------- Sticky comment + findings ledger ----------
           # Find OUR previous sticky comment. Author-filtered to
           # github-actions[bot]: any user can post a comment containing the
@@ -312,7 +342,11 @@ jobs:
                   | jq -c '[.files[]? | .filename, (.previous_filename // empty)]' 2>/dev/null || true)
                 if [ -z "$paths_json" ]; then paths_json='[]'; fi
                 docs_only=$(printf '%s' "$paths_json" | jq -r 'length > 0 and all(endswith(".md"))' 2>/dev/null || true)
-                if [ "$docs_only" = "true" ] && [ "$nfiles" -lt 300 ]; then
+                # The skip exists for docs-only pushes to CODE PRs. On a
+                # docs-mode PR every delta is *.md by definition, and
+                # skipping would mean no push after round 1 is ever
+                # re-reviewed — findings could never be verified fixed.
+                if [ "$docs_only" = "true" ] && [ "$nfiles" -lt 300 ] && [ "$DOCS_MODE" != "1" ]; then
                   echo "::notice::docs-only delta since $LAST_SHA (all *.md) — skipping this review round"
                   exit 0
                 fi
@@ -538,6 +572,47 @@ jobs:
           else
             gh pr diff "$PR" --name-only 2>/dev/null > attach_list.txt || true
           fi
+          if [ "$DOCS_MODE" = "1" ]; then
+            # Docs cite their subject. Pull path-shaped tokens out of the
+            # diff and attach those files (at HEAD) as evidence — without
+            # this the prompt contains only markdown and no claim about the
+            # implementation is verifiable, which is the whole reason
+            # docs-mode exists. Tokens that name no real file just 404 in
+            # the fetch loop and cost nothing. Sources go FIRST in the
+            # list: they are the evidence, while the changed .md content is
+            # already fully visible in the diff of an added/edited doc, so
+            # when the budget bites it should bite the redundant side.
+            # The deny-list below still applies — a docs PR must not become
+            # a channel for attaching secrets-shaped files.
+            mv attach_list.txt attach_docs.txt
+            grep -oE '\.?[A-Za-z0-9_][A-Za-z0-9_./-]*\.(py|pyi|ts|tsx|js|mjs|go|rs|rb|java|kt|kts|c|h|cc|cpp|hpp|cs|php|swift|scala|sql|lua|sh|bash|yml|yaml|toml|cfg|json)' fulldiff.txt \
+              | sed 's#^\./##' | sort -u > tokens_raw.txt || true
+            # Docs cite paths relative to THEIR OWN directory as often as to
+            # the repo root: `./client.py` inside docs/guide.md usually
+            # means docs/client.py, which a root-anchored fetch would 404
+            # on and silently attach nothing. For each token, also try it
+            # prefixed with each changed doc's directory. Wrong guesses
+            # just 404 in the fetch loop; the candidate cap below and
+            # FILE_COUNT_CAP keep the fan-out bounded.
+            : > tokens_variants.txt
+            while IFS= read -r md; do
+              # `--` plus a fallback: a root file named `-guide.md` would
+              # otherwise be read by dirname as an option, and the failing
+              # assignment would errexit the step — a hard fail on the
+              # advisory path.
+              d=$(dirname -- "$md" 2>/dev/null) || d="."
+              [ "$d" = "." ] && continue
+              awk -v d="$d" '$0 !~ "^" d "/" { print d "/" $0 }' tokens_raw.txt >> tokens_variants.txt || true
+            done < attach_docs.txt
+            # Literal citations FIRST, directory guesses after, order
+            # preserved through the dedup: a sorted union would let the
+            # guesses crowd the real tokens out of the candidate cap, and
+            # an unattached cited source is exactly the evidence gap
+            # docs-mode exists to close.
+            cat tokens_raw.txt tokens_variants.txt \
+              | awk '!seen[$0]++' | head -40 > attach_list.txt || true
+            cat attach_docs.txt >> attach_list.txt
+          fi
           : > changedfiles.txt
           files_total=0
           files_n=0
@@ -642,7 +717,7 @@ jobs:
             files_n=$((files_n + 1))
           done < attach_list.txt
           [ -z "$skipped" ] || echo "::notice::changed files not attached (cap/deny-list):$skipped"
-          echo "::notice::ai-review context: delta_mode=${DELTA_MODE} diff=$(wc -c < fulldiff.txt | tr -d ' ')B delta=$(wc -c < delta.txt | tr -d ' ')B guidance=$(wc -c < guidance.txt | tr -d ' ')B files=${files_n} (${files_total}B)"
+          echo "::notice::ai-review context: docs_mode=${DOCS_MODE} delta_mode=${DELTA_MODE} diff=$(wc -c < fulldiff.txt | tr -d ' ')B delta=$(wc -c < delta.txt | tr -d ' ')B guidance=$(wc -c < guidance.txt | tr -d ' ')B files=${files_n} (${files_total}B)"
 
           # ---------- Build the review prompt ----------
           # With no `shell:` key GitHub runs `bash -e {0}` — errexit, but NOT
@@ -701,8 +776,38 @@ jobs:
             lang_detail=""
           fi
 
-          system='You are an advisory reviewer for pull requests in this repository.
-          Focus on: real bugs and logic errors introduced by the diff,
+          # The first three paragraphs of the system prompt differ by mode.
+          # Normal mode excludes documentation accuracy from the reporting
+          # bar (noise control); docs-mode makes it the subject and treats
+          # the attached source files as ground truth. Everything below the
+          # splice (Scope, Ledger, Severity, Output format) is shared, so
+          # the parsers and the ledger contract stay mode-independent.
+          if [ "$DOCS_MODE" = "1" ]; then
+            focus_para='This pull request changes documentation only, so
+          documentation accuracy IS the review subject. Focus on:
+          statements in the changed documentation that are contradicted by
+          the attached source files (wrong signatures, parameters or
+          defaults; behavior the code does not implement), commands or
+          examples that would fail if a reader ran them, contradictions
+          within the documentation itself, and security-relevant
+          misdirection. Treat a failing command or security misdirection
+          as blocking; other inaccuracies as advisory.
+
+          The prompt may include source files cited by the documentation,
+          attached as evidence. Judge documented claims against them; do
+          not report a claim you cannot check against material in this
+          prompt. Anchor every finding to a documentation line inside the
+          report scope defined below.
+
+          Reporting bar: report a finding only if you can name the exact
+          documented claim and the evidence that contradicts it. Do NOT
+          report: style, tone or wording preferences; formatting;
+          pre-existing documentation the diff does not touch; missing
+          documentation; anything the findings ledger marks fixed or
+          dismissed. Prefer missing a borderline issue over reporting a
+          speculative one. Report at most 3 findings, most severe first.'
+          else
+            focus_para='Focus on: real bugs and logic errors introduced by the diff,
           violations of the repository guidance included in the prompt,
           cross-file inconsistencies, and security issues.
 
@@ -722,7 +827,11 @@ jobs:
           non-compliant peer or component, unless you name the concrete
           malformed input; anything the findings ledger marks fixed or
           dismissed. Prefer missing a borderline issue over reporting a
-          speculative one. Report at most 3 findings, most severe first.
+          speculative one. Report at most 3 findings, most severe first.'
+          fi
+
+          system='You are an advisory reviewer for pull requests in this repository.
+          '"$focus_para"'
 
           Scope: when the prompt contains a section titled "New-commits
           diff", report findings only on hunks in that section — the
