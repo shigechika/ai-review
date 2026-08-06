@@ -80,8 +80,9 @@ skipped by the engine itself.
 
 ## Verifying your setup
 
-Open any real (non-draft, non-dependabot) pull request and check the
-`review` job's log:
+Open a real pull request — not a draft, not from Dependabot, and not a
+same-repo `release-please--*` branch, all three are skipped by the engine
+itself — and check the `review` job's log:
 
 - `::notice::guidance <file>: sent N of M bytes` — appears once per
   guidance file present in your repository. Missing entirely means the
@@ -89,13 +90,17 @@ Open any real (non-draft, non-dependabot) pull request and check the
   at the base revision, which is normal if you have none.
 - `::notice::ai-review context: docs_mode=… delta_mode=… diff=…B …` — one
   line summarizing what was actually sent to the model. `diff=0B` or a
-  missing line means the diff fetch failed; a missing sticky comment on
-  the PR with no `::warning::` in the log points at a `gh api` permission
-  problem instead.
+  missing line means the diff fetch failed.
 - `::warning::AI_REVIEW_ENDPOINT / AI_REVIEW_API_KEY not set — skipping AI
   review` means exactly what it says — the two secrets below are missing
   or empty on this repository (or this is a fork PR, which never gets
   secrets by design).
+- No sticky comment and no `::warning::` at all usually means one of the
+  `::notice::...skipping this round` lines fired instead (a docs-only
+  push, or a head already reviewed in an earlier round) — check the log
+  for one before suspecting a bug. If the `review` job did not run at
+  all, the problem is upstream of the engine: the caller's `on:` triggers,
+  or a branch protection rule blocking the workflow.
 
 Every failure path is a `::warning::` with no other visible effect
 (advisory-only design) — there is no separate health-check endpoint or
