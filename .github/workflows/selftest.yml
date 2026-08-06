@@ -1,0 +1,31 @@
+name: AI review selftest
+
+# Dogfoods the engine: every PR to this repository is reviewed by the PR's
+# OWN revision of ai-review.yml — a relative `uses:` resolves inside the
+# merge ref that pull_request events build, so an engine change is exercised
+# by the very PR that proposes it. synchronize is included so a follow-up
+# push takes the delta-round path (ledger + compare API), the engine
+# behavior most likely to regress silently.
+#
+# This file doubles as the caller template documented in the README, with
+# one difference: real callers pin a tag instead of the relative path —
+#   uses: shigechika/ai-review/.github/workflows/ai-review.yml@v1
+
+on:
+  pull_request:
+    types: [opened, reopened, ready_for_review, synchronize]
+
+permissions:
+  contents: read
+  pull-requests: write # post / update the review comment
+
+concurrency:
+  group: ai-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    uses: ./.github/workflows/ai-review.yml
+    secrets:
+      AI_REVIEW_ENDPOINT: ${{ secrets.AI_REVIEW_ENDPOINT }}
+      AI_REVIEW_API_KEY: ${{ secrets.AI_REVIEW_API_KEY }}
