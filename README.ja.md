@@ -77,27 +77,28 @@ PR ごと（caller が `synchronize` を有効にしていれば push ごと）�
 
 ## 動作確認
 
-実際の（draft でも dependabot でもない）PR を開き、`review` ジョブのログを
-確認してください:
+draft でも dependabot でもない、実際の PR を1つ開いて `review` ジョブの
+ログを見てください。
 
-- `::notice::guidance <file>: sent N of M bytes` — リポジトリに存在する
-  ガイダンスファイルごとに1行出ます。まったく出ない場合は BASE リビジョンに
-  `CLAUDE.md`/`AGENTS.md`/`.github/copilot-instructions.md` が無いということ
-  で、それ自体は正常です。
-- `::notice::ai-review context: docs_mode=… delta_mode=… diff=…B …` — 実際に
-  モデルへ送った内容の要約が1行出ます。`diff=0B` やこの行自体が無い場合は
-  diff 取得に失敗しています。`::warning::` が出ていないのに sticky コメント
-  が付かない場合は `gh api` の権限不足が疑われます。
+- `::notice::guidance <file>: sent N of M bytes` — リポジトリにある
+  ガイダンスファイルごとに1行表示されます。1行も出ない場合は、BASE
+  リビジョンに `CLAUDE.md`・`AGENTS.md`・`.github/copilot-instructions.md`
+  のどれも無いだけなので問題ありません。
+- `::notice::ai-review context: docs_mode=… delta_mode=… diff=…B …` —
+  モデルに実際に送った内容の要約が1行出ます。`diff=0B` になっていたり
+  この行自体が出ていない場合は diff の取得に失敗しています。`::warning::`
+  が出ていないのに sticky コメントが付かないときは、`gh api` の権限不足を
+  疑ってください。
 - `::warning::AI_REVIEW_ENDPOINT / AI_REVIEW_API_KEY not set — skipping AI
-  review` はそのまま、リポジトリに2つの secrets が未設定（または空）である
-  ことを意味します（fork PR は設計上 secrets を受け取らないため常にこれに
-  該当します）。
+  review` はそのまま、リポジトリに2つの secrets が未設定（または空）だと
+  いうことです（fork からの PR は仕様上 secrets を受け取らないため、常に
+  このメッセージになります）。
 
-すべての失敗経路は `::warning::` を出すだけで他に見える影響を残しません
-（アドバイザリ専用設計）— 専用のヘルスチェック用エンドポイントやワークフロー
-は別途ありません。複数リポジトリでこのエンジンを運用している場合、信頼できる
-シグナルはレビュアー自身が見ているものと同じです: 直近の実 PR に sticky
-コメントが付いたかどうかです。
+失敗経路はすべて `::warning::` を出すだけで、それ以外の影響は残しません
+（アドバイザリ専用の設計です）。専用のヘルスチェック用エンドポイントや
+ワークフローは用意していません。複数リポジトリでこのエンジンを運用して
+いるなら、見るべきシグナルはレビュアーが普段見ているものと同じです —
+直近の実 PR に sticky コメントが付いているかどうか、それだけです。
 
 ## 設定
 
