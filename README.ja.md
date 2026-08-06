@@ -75,6 +75,36 @@ PR ごと（caller が `synchronize` を有効にしていれば push ごと）�
 これだけです。Draft PR・`release-please--*` ブランチ・Dependabot の PR は
 エンジン側でスキップされます。
 
+## 動作確認
+
+実際の PR を1つ開いて `review` ジョブのログを見てください。draft・
+dependabot の PR・同一リポジトリの `release-please--*` ブランチは、
+いずれもエンジン自身がスキップするので確認には使えません。
+
+- `::notice::guidance <file>: sent N of M bytes` — リポジトリにある
+  ガイダンスファイルごとに1行表示されます。1行も出ない場合は、BASE
+  リビジョンに `CLAUDE.md`・`AGENTS.md`・`.github/copilot-instructions.md`
+  のどれも無いだけなので問題ありません。
+- `::notice::ai-review context: docs_mode=… delta_mode=… diff=…B …` —
+  モデルに実際に送った内容の要約が1行出ます。`diff=0B` になっていたり
+  この行自体が出ていない場合は diff の取得に失敗しています。
+- `::warning::AI_REVIEW_ENDPOINT / AI_REVIEW_API_KEY not set — skipping AI
+  review` はそのまま、リポジトリに2つの secrets が未設定（または空）だと
+  いうことです（fork からの PR は仕様上 secrets を受け取らないため、常に
+  このメッセージになります）。
+- sticky コメントも `::warning::` も何も出ていない場合は、たいてい
+  `::notice::...skipping this round` のどれか（ドキュメントのみの push、
+  または既にレビュー済みの head への push）が出ているはずです。バグを
+  疑う前にまずログを確認してください。`review` ジョブ自体が一度も
+  走っていない場合は、エンジンより手前 — caller 側の `on:` トリガーや
+  ブランチ保護ルールを見直してください。
+
+失敗経路はすべて `::warning::` を出すだけで、それ以外の影響は残しません
+（アドバイザリ専用の設計です）。専用のヘルスチェック用エンドポイントや
+ワークフローは用意していません。複数リポジトリでこのエンジンを運用して
+いるなら、見るべきシグナルはレビュアーが普段見ているものと同じです —
+直近の実 PR に sticky コメントが付いているかどうか、それだけです。
+
 ## 設定
 
 すべて任意です。各設定は
