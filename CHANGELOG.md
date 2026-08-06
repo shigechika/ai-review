@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.0](https://github.com/shigechika/ai-review/compare/v1.0.0...v1.1.0) (2026-08-06)
+
+
+### Features
+
+* docs-mode — review documentation-only PRs against cited sources ([#6](https://github.com/shigechika/ai-review/issues/6)) ([93bbbbd](https://github.com/shigechika/ai-review/commit/93bbbbd31a4edcbea6468fa7930bd71ea3d0f272))
+
 ## v1.0.0 (2026-08-06)
 
 Initial release.
