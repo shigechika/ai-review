@@ -594,13 +594,23 @@ jobs:
             # prefixed with each changed doc's directory. Wrong guesses
             # just 404 in the fetch loop; the candidate cap below and
             # FILE_COUNT_CAP keep the fan-out bounded.
-            cp tokens_raw.txt tokens_all.txt
+            : > tokens_variants.txt
             while IFS= read -r md; do
-              d=$(dirname "$md")
+              # `--` plus a fallback: a root file named `-guide.md` would
+              # otherwise be read by dirname as an option, and the failing
+              # assignment would errexit the step — a hard fail on the
+              # advisory path.
+              d=$(dirname -- "$md" 2>/dev/null) || d="."
               [ "$d" = "." ] && continue
-              awk -v d="$d" '$0 !~ "^" d "/" { print d "/" $0 }' tokens_raw.txt >> tokens_all.txt || true
+              awk -v d="$d" '$0 !~ "^" d "/" { print d "/" $0 }' tokens_raw.txt >> tokens_variants.txt || true
             done < attach_docs.txt
-            sort -u tokens_all.txt | head -40 > attach_list.txt || true
+            # Literal citations FIRST, directory guesses after, order
+            # preserved through the dedup: a sorted union would let the
+            # guesses crowd the real tokens out of the candidate cap, and
+            # an unattached cited source is exactly the evidence gap
+            # docs-mode exists to close.
+            cat tokens_raw.txt tokens_variants.txt \
+              | awk '!seen[$0]++' | head -40 > attach_list.txt || true
             cat attach_docs.txt >> attach_list.txt
           fi
           : > changedfiles.txt
