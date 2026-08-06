@@ -1288,13 +1288,31 @@ jobs:
             # the whole open list precisely when there is no room for any of
             # it. (No apostrophes in these comments — the surrounding shell
             # single-quote would end the jq program right here.)
+            #
+            # Within the open slice, blocking-open entries fill the room
+            # before advisory-open ones. A dropped open entry is normally
+            # harmless (it is simply re-reported next round), but that
+            # recovery only works if the round that drops it still looks at
+            # the code again — a delta round only re-examines the new
+            # commits, so an old open finding sitting outside the diff for
+            # the round that dropped it would vanish with no re-report and
+            # no visible trace.
+            # Shedding an advisory one that way is the intended trade-off
+            # this cap already accepts; silently shedding a blocking one the
+            # same way is the same class of bug the verdict fix above closes
+            # by another door, and severity ordering here closes it.
             | . as $precap
             | (if ($precap | length) > 80
                then ($precap | map(select(.status != "open")) | .[-80:]) as $s
                     | (80 - ($s | length)) as $room
-                    | $s + (if $room > 0
-                            then ($precap | map(select(.status == "open")) | .[-$room:])
-                            else [] end)
+                    | (if $room > 0
+                       then ($precap | map(select(.status == "open" and .severity == "blocking"))) as $ob
+                            | ($precap | map(select(.status == "open" and .severity != "blocking"))) as $oa
+                            | ($ob | .[-$room:]) as $kb
+                            | ($room - ($kb | length)) as $room2
+                            | $kb + (if $room2 > 0 then ($oa | .[-$room2:]) else [] end)
+                       else [] end) as $open_kept
+                    | $s + $open_kept
                else $precap end) as $capped
             | {findings: $capped, precap_n: ($precap | length)}
           ' 2>/dev/null || true)
