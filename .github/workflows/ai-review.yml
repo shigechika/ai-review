@@ -277,66 +277,88 @@ jobs:
                 echo "::notice::no file changes since last reviewed commit $LAST_SHA — skipping this round"
                 exit 0
               fi
-              if [ "$nfiles" -eq 0 ]; then
-                echo "::notice::empty delta since $LAST_SHA (compare status '$cstatus' — force-push to an ancestor?) — degrading to a full-diff review"
-              fi
-              # Docs-only skip: only when EVERY path in the delta is *.md.
-              # A rename reports only its destination in .filename, so
-              # previous_filename has to be tested too — otherwise a push
-              # renaming code to *.md reads as docs-only and the removal of
-              # that code goes unreviewed. nfiles stays the .files count so
-              # the 300-entry truncation guard below keeps its meaning, and
-              # the `length > 0` term stops an empty delta from satisfying
-              # all/1 vacuously.
-              paths_json=$(printf '%s' "$compare" \
-                | jq -c '[.files[]? | .filename, (.previous_filename // empty)]' 2>/dev/null || true)
-              if [ -z "$paths_json" ]; then paths_json='[]'; fi
-              docs_only=$(printf '%s' "$paths_json" | jq -r 'length > 0 and all(endswith(".md"))' 2>/dev/null || true)
-              if [ "$docs_only" = "true" ] && [ "$nfiles" -lt 300 ]; then
-                echo "::notice::docs-only delta since $LAST_SHA (all *.md) — skipping this review round"
-                exit 0
-              fi
-              # Delta mode only when the delta is COMPLETE: the compare API
-              # caps .files at 300 entries, and a file can come back with a
-              # null .patch (binary, or a patch too large to inline). In
-              # either case the delta under-represents the push, and since
-              # the system prompt scopes REPORTING to the delta, code missing
-              # from it would become unreviewable. An incomplete delta
-              # therefore degrades this round to a full-diff review instead.
-              missing_patch=$(printf '%s' "$compare" \
-                | jq -r '[.files[]? | select(.patch == null)] | length' 2>/dev/null || true)
-              case "$missing_patch" in ''|*[!0-9]*) missing_patch=1 ;; esac
-              if [ "$nfiles" -ge 300 ] || [ "$missing_patch" -gt 0 ]; then
-                echo "::notice::delta since $LAST_SHA is incomplete (files=$nfiles, missing patches=$missing_patch) — degrading to a full-diff review"
+              # Everything below — the docs-only skip AND delta mode —
+              # requires the compare to be strictly "ahead" (every reviewed
+              # commit is an ancestor of the new head). After a force-push
+              # the three-dot compare reports status "diverged" and can
+              # still return a complete-looking, non-empty patch — but its
+              # .files cover only the NEW side of the divergence: a
+              # rewritten head that discards a previously reviewed fix
+              # while adding b.py yields a delta containing only b.py, so
+              # the regression in the discarded file would be scoped out of
+              # review (or, if the new side is all *.md, wrongly skip the
+              # round) while the ledger records the rewritten head as
+              # reviewed. Degrade to a full-diff round instead (found by
+              # this workflow reviewing its own change, R1F2).
+              if [ "$cstatus" != "ahead" ]; then
+                echo "::notice::compare status '${cstatus:-unknown}' since $LAST_SHA is not strictly ahead (force-push rewrote history?) — degrading to a full-diff review"
+              elif [ "$nfiles" -eq 0 ]; then
+                # "ahead" with an empty file list: empty commits. Nothing to
+                # scope a delta to; review the full diff.
+                echo "::notice::empty delta since $LAST_SHA (empty commits?) — degrading to a full-diff review"
               else
-                printf '%s' "$compare" \
-                  | jq -r '.files[]? | "--- " + .filename + " (" + .status + ")\n"
-                           + .patch + "\n"' 2>/dev/null \
-                  > delta_raw.txt || true
-                # Third completeness guard, same class as the two above: a
-                # delta exceeding the prompt cap cannot be included whole,
-                # and truncating it while reporting stays scoped to it would
-                # make the truncated-away code unreviewable. Over-cap deltas
-                # degrade to a full-diff round instead — full-diff's own cap
-                # truncation is the pre-existing, documented limitation and
-                # carries no scoped-reporting contract.
-                delta_bytes=$(wc -c < delta_raw.txt | tr -d ' ')
-                # Parse-failure default is over-cap (fail toward full-diff),
-                # matching missing_patch's fail-closed default of 1.
-                case "$delta_bytes" in ''|*[!0-9]*) delta_bytes=100001 ;; esac
-                if [ "$delta_bytes" -gt 100000 ]; then
-                  echo "::notice::delta since $LAST_SHA exceeds the prompt cap (${delta_bytes} bytes) — degrading to a full-diff review"
-                elif [ -s delta_raw.txt ]; then
-                  mv delta_raw.txt delta.txt
-                  DELTA_MODE=1
-                  # Capture the delta's file list HERE, where $compare is
-                  # known good and this branch is the only one that commits
-                  # to delta mode — deriving the list later from state a
-                  # degrade path may have left behind would attach the wrong
-                  # files. Removed files are dropped: their content is gone
-                  # at head and the Contents API would 404 on them anyway.
-                  DELTA_FILES=$(printf '%s' "$compare" \
-                    | jq -r '.files[]? | select(.status != "removed") | .filename' 2>/dev/null || true)
+                # Docs-only skip: only when EVERY path in the delta is *.md.
+                # A rename reports only its destination in .filename, so
+                # previous_filename has to be tested too — otherwise a push
+                # renaming code to *.md reads as docs-only and the removal
+                # of that code goes unreviewed. nfiles stays the .files
+                # count so the 300-entry truncation guard below keeps its
+                # meaning, and the `length > 0` term stops an empty delta
+                # from satisfying all/1 vacuously.
+                paths_json=$(printf '%s' "$compare" \
+                  | jq -c '[.files[]? | .filename, (.previous_filename // empty)]' 2>/dev/null || true)
+                if [ -z "$paths_json" ]; then paths_json='[]'; fi
+                docs_only=$(printf '%s' "$paths_json" | jq -r 'length > 0 and all(endswith(".md"))' 2>/dev/null || true)
+                if [ "$docs_only" = "true" ] && [ "$nfiles" -lt 300 ]; then
+                  echo "::notice::docs-only delta since $LAST_SHA (all *.md) — skipping this review round"
+                  exit 0
+                fi
+                # Delta mode only when the delta is COMPLETE: the compare
+                # API caps .files at 300 entries, and a file can come back
+                # with a null .patch (binary, or a patch too large to
+                # inline). In either case the delta under-represents the
+                # push, and since the system prompt scopes REPORTING to the
+                # delta, code missing from it would become unreviewable. An
+                # incomplete delta therefore degrades this round to a
+                # full-diff review instead.
+                missing_patch=$(printf '%s' "$compare" \
+                  | jq -r '[.files[]? | select(.patch == null)] | length' 2>/dev/null || true)
+                case "$missing_patch" in ''|*[!0-9]*) missing_patch=1 ;; esac
+                if [ "$nfiles" -ge 300 ] || [ "$missing_patch" -gt 0 ]; then
+                  echo "::notice::delta since $LAST_SHA is incomplete (files=$nfiles, missing patches=$missing_patch) — degrading to a full-diff review"
+                else
+                  printf '%s' "$compare" \
+                    | jq -r '.files[]? | "--- " + .filename + " (" + .status + ")\n"
+                             + .patch + "\n"' 2>/dev/null \
+                    > delta_raw.txt || true
+                  # Third completeness guard, same class as the two above: a
+                  # delta exceeding the prompt cap cannot be included whole,
+                  # and truncating it while reporting stays scoped to it
+                  # would make the truncated-away code unreviewable.
+                  # Over-cap deltas degrade to a full-diff round instead —
+                  # full-diff's own cap truncation is the pre-existing,
+                  # documented limitation and carries no scoped-reporting
+                  # contract.
+                  delta_bytes=$(wc -c < delta_raw.txt | tr -d ' ')
+                  # Parse-failure default is over-cap (fail toward
+                  # full-diff), matching missing_patch's fail-closed default
+                  # of 1.
+                  case "$delta_bytes" in ''|*[!0-9]*) delta_bytes=100001 ;; esac
+                  if [ "$delta_bytes" -gt 100000 ]; then
+                    echo "::notice::delta since $LAST_SHA exceeds the prompt cap (${delta_bytes} bytes) — degrading to a full-diff review"
+                  elif [ -s delta_raw.txt ]; then
+                    mv delta_raw.txt delta.txt
+                    DELTA_MODE=1
+                    # Capture the delta's file list HERE, where $compare is
+                    # known good and this branch is the only one that
+                    # commits to delta mode — deriving the list later from
+                    # state a degrade path may have left behind would attach
+                    # the wrong files. Removed files are dropped: their
+                    # content is gone at head and the Contents API would 404
+                    # on them anyway.
+                    DELTA_FILES=$(printf '%s' "$compare" \
+                      | jq -r '.files[]? | select(.status != "removed") | .filename' 2>/dev/null || true)
+                  fi
                 fi
               fi
             fi
@@ -375,7 +397,13 @@ jobs:
           FILE_COUNT_CAP=15
           case "$FILES_TOTAL_CAP_INPUT" in
             ''|*[!0-9]*) : ;;         # unset or non-numeric: keep the default
-            *) FILES_TOTAL_CAP=$FILES_TOTAL_CAP_INPUT ;;
+            # 10# forces base-10: a digits-only value with a leading zero
+            # ("080000") would otherwise be read as an OCTAL literal by the
+            # arithmetic below, and 8 is not an octal digit — the expansion
+            # aborts and errexit hard-fails the step, breaking the advisory
+            # soft-fail contract (found by this workflow reviewing its own
+            # change, R1F3).
+            *) FILES_TOTAL_CAP=$((10#$FILES_TOTAL_CAP_INPUT)) ;;
           esac
           guidance_total=0
 
@@ -528,13 +556,23 @@ jobs:
             #
             # NOISE: lock files and minified bundles are large, mechanical
             # and never the subject of a review finding.
+            # Pattern note: in a shell `case`, `*` crosses `/`, so pure
+            # SUFFIX patterns (*.env, *.pem, *.lock) already match at any
+            # depth. Anchored basename patterns do not: `.env.*` or
+            # `config.ini` alone would miss `apps/api/.env.production` and
+            # `deploy/config.ini`, silently attaching nested credential
+            # files (found by this workflow reviewing its own change, R1F1).
+            # Every anchored pattern therefore carries a `*/` twin. The
+            # guidance names stay root-only on purpose — those are the paths
+            # the guidance fetch reads, and a nested copy is an ordinary
+            # changed file.
             case "$f" in
               CLAUDE.md|AGENTS.md|.github/copilot-instructions.md)
                 skipped="$skipped $f"; continue ;;
-              dot.env|.env|*.env|.env.*) skipped="$skipped $f"; continue ;;
-              config.ini|*.pem|*.key|*.p12|*.pfx|id_rsa*|*service_account*.json)
+              dot.env|.env|*/.env|*.env|.env.*|*/.env.*) skipped="$skipped $f"; continue ;;
+              config.ini|*/config.ini|*.pem|*.key|*.p12|*.pfx|id_rsa*|*/id_rsa*|*service_account*.json)
                 skipped="$skipped $f"; continue ;;
-              *.lock|package-lock.json|*.min.*|*.min) skipped="$skipped $f"; continue ;;
+              *.lock|package-lock.json|*/package-lock.json|*.min.*|*.min) skipped="$skipped $f"; continue ;;
               # BINARY / BULK DATA: the API hands these back base64 like any
               # other blob, so without a filter a tracked PNG or a .pickle.xz
               # would decode into the prompt as 48 KiB of noise AND consume
