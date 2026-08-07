@@ -18,7 +18,7 @@ jobs:
     # "Run actionlint" step for 2+ hours before being manually cancelled.
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: Install actionlint
         # Direct release download, not the upstream install script — that
         # script's own `curl -L` has no --max-time/--retry, so a stalled
@@ -37,6 +37,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: Run the engine's extraction + logic test suite
         run: bash tests/run_all.sh
