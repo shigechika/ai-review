@@ -30,8 +30,18 @@ jobs:
             -o actionlint.tar.gz \
             https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz
           tar xzf actionlint.tar.gz actionlint
-      - name: Run actionlint
-        run: ./actionlint -color
+      - name: Run actionlint (workflow structure; embedded shell checked separately below)
+        # -shellcheck= disables actionlint's built-in shellcheck integration.
+        # It has a known, unfixed upstream deadlock (rhysd/actionlint#712):
+        # a run: block whose script exceeds the OS pipe buffer (65536 bytes)
+        # hangs the process forever. This repo's own "Request AI review"
+        # step is 67139 bytes, just over that threshold — hit twice in
+        # practice as a silent multi-hour CI hang before being diagnosed.
+        run: ./actionlint -color -shellcheck=
+      - name: Shellcheck embedded run steps (file-based, avoids the pipe deadlock above)
+        run: |
+          pip install --quiet pyyaml
+          python3 scripts/lint-embedded-shell.py
 
   unit-tests:
     runs-on: ubuntu-latest
