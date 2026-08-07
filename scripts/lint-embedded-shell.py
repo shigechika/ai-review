@@ -62,9 +62,13 @@ def effective_default_shell(workflow_defaults: dict | None, job_defaults: dict |
 
 def step_is_bash(step: dict, default_shell: str | None) -> bool:
     shell = step.get("shell") or default_shell
-    # GitHub Actions' own default on ubuntu-latest is bash; only "bash" and
-    # unset-with-no-python/pwsh/etc. default should be shellchecked.
-    return shell is None or shell == "bash"
+    if shell is None:
+        return True
+    # GitHub Actions allows a custom shell command string (e.g.
+    # "bash -e {0}", "bash --noprofile --norc -eo pipefail {0}") in place
+    # of a bare "bash" -- still bash underneath, just with extra flags, and
+    # still worth shellchecking. Only the leading command word matters.
+    return shell.split()[0] == "bash" if shell.strip() else False
 
 
 def env_keys(*envs: dict | None) -> set[str]:
