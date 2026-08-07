@@ -11,6 +11,12 @@ permissions:
 jobs:
   actionlint:
     runs-on: ubuntu-latest
+    # No default timeout is 6h — a hung download (the install script curls
+    # GitHub directly, no retry/backoff) or a pathological shellcheck input
+    # would otherwise block every PR's status check for hours with no
+    # self-recovery. Seen in practice: this job sat "in_progress" on the
+    # "Run actionlint" step for 2+ hours before being manually cancelled.
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
       - name: Run actionlint
@@ -20,6 +26,7 @@ jobs:
 
   unit-tests:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
       - name: Run the engine's extraction + logic test suite
