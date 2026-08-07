@@ -176,4 +176,39 @@ severity: $ja_val
 t "render: a multibyte value truncated at the 200-byte cap stays valid UTF-8" \
   "yes" "$(printf '%s' "$out" | iconv -f UTF-8 -t UTF-8 >/dev/null 2>&1 && echo yes || echo no)"
 
+# ---------- Sticky-comment GC: OLD_COMMENT_IDS collection ----------
+# Mirrors the sticky_all -> OLD_COMMENT_IDS pipeline (see the "Sticky
+# comment + findings ledger" section of the engine): every marker comment
+# still on the PR must be collected for deletion, not just the newest.
+# The mirrored function below reuses the engine's own printf/while idiom
+# so a regression to the no-trailing-newline form (printf '%s' emits none,
+# and `read` silently drops the final line at EOF without one) fails here
+# instead of only showing up as orphaned comments in production.
+collect_old_ids() {
+  local sticky_all=$1
+  printf '%s\n' "$sticky_all" | while IFS= read -r b64; do
+    [ -n "$b64" ] || continue
+    printf '%s' "$b64" | base64 -d 2>/dev/null | jq -r '.id // empty' 2>/dev/null
+  done
+}
+mkb64() { jq -c -n --arg id "$1" '{id: ($id|tonumber), body: "x"}' | base64 | tr -d '\n'; }
+
+t "sticky-gc: zero old comments yields nothing" \
+  "" "$(collect_old_ids '' | tr -d '\n')"
+one=$(mkb64 111)
+t "sticky-gc: a single old comment (the common every-round case) is collected" \
+  "111" "$(collect_old_ids "$one")"
+three=$(printf '%s\n%s\n%s' "$(mkb64 111)" "$(mkb64 222)" "$(mkb64 333)")
+t "sticky-gc: three old comments are all collected" \
+  "3" "$(collect_old_ids "$three" | wc -l | tr -d ' ')"
+t "sticky-gc: three old comments preserve every id" \
+  "111 222 333" "$(collect_old_ids "$three" | tr '\n' ' ' | sed 's/ $//')"
+
+# Structural check: the engine's real OLD_COMMENT_IDS assignment must feed
+# sticky_all through printf '%s\n' (trailing newline), not printf '%s' —
+# the no-newline form makes `read` silently drop the final entry at EOF,
+# which is exactly the single-old-comment case that happens every round.
+t "engine: sticky_all is read with a trailing newline (no dropped last line)" "yes" \
+  "$(grep -qF "OLD_COMMENT_IDS=\$(printf '%s\\n' \"\$sticky_all\" | while IFS= read -r b64; do" "$ENGINE" && echo yes || echo no)"
+
 t_summary

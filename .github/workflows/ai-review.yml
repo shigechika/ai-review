@@ -15,12 +15,20 @@ name: AI review
 #
 #   * Sticky comment: ONE bot-authored comment per PR at a time (marker
 #     <!-- ai-review-sticky -->). Each round POSTS A FRESH comment at the
-#     bottom of the PR timeline, then deletes the previous one (post-then-
-#     delete, never the reverse, so a mid-round failure leaves the old
-#     comment in place rather than the PR ending up with zero review
-#     comments) — a reviewer finds the current state by checking the last
-#     comment, instead of scrolling back to wherever round 1 happened to
-#     land. A machine-readable findings ledger rides inside it, base64-
+#     bottom of the PR timeline, then deletes every earlier marker comment
+#     it can still find (post-then-delete, never the reverse, so a
+#     mid-round failure leaves the old comment(s) in place rather than the
+#     PR ending up with zero review comments) — a reviewer finds the
+#     current state by checking the most recent ai-review comment,
+#     instead of scrolling back to wherever round 1 happened to land (a
+#     skipped push posts nothing, so that comment is not always the very
+#     last one in the thread). A delete failure leaves
+#     an orphan, but it is not permanent: the next successful round
+#     re-scans for every marker comment still on the PR and deletes it,
+#     not just its immediate predecessor. Posting a fresh comment on every
+#     non-skipped push also means every push now notifies PR subscribers,
+#     unlike the previous edit-in-place behavior, which was silent. A
+#     machine-readable findings ledger rides inside it, base64-
 #     encoded in an HTML comment — base64 because a raw "--" inside JSON
 #     would terminate the HTML comment, and because it survives GitHub
 #     markdown rendering untouched. The ledger carries a per-finding status
@@ -243,19 +251,38 @@ jobs:
           # marker string, and that must not become the trusted ledger.
           # `--paginate` emits one JSON array per page; jq iterates each.
           comments=$(gh api "repos/$GH_REPO/issues/$PR/comments" --paginate 2>/dev/null || printf '[]')
-          # NEWEST matching comment wins (tail, not head): the post-then-
-          # delete step below can leave TWO marker comments around if the
-          # delete of the old one fails (network blip, already-deleted-by-
-          # a-human race) — the newest one is always this round's, carrying
-          # the current ledger. Selecting the oldest would pick up a stale
-          # ledger and a stale round counter forever, reintroducing the
-          # duplicate-comment noise this workflow exists to remove.
-          sticky_b64=$(printf '%s' "$comments" \
+          # Every one of OUR marker comments still on the PR, oldest to
+          # newest. A prior round's post-then-delete can leave more than
+          # one behind (network blip, already-deleted-by-a-human race, or
+          # two overlapping runs), and each survivor is a candidate for
+          # cleanup once this round's comment is safely posted — see
+          # OLD_COMMENT_IDS below. Without this, only the single most
+          # recent orphan was ever collected, so any earlier orphan (e.g.
+          # from a round-3 delete failure) sat on the PR forever, since no
+          # later round would ever look further back than "the previous
+          # one".
+          sticky_all=$(printf '%s' "$comments" \
             | jq -r '.[]
                      | select(.user.login == "github-actions[bot]")
                      | select(.body | contains("<!-- ai-review-sticky -->"))
-                     | ({id, body} | tojson | @base64)' 2>/dev/null \
-            | tail -n 1 || true)
+                     | ({id, body} | tojson | @base64)' 2>/dev/null || true)
+          # NEWEST matching comment carries the ledger we resume from: this
+          # workflow always appends the genuine ledger last, so as long as
+          # runs for this PR do not overlap (the caller-side concurrency
+          # group this repo recommends), the newest marker comment is this
+          # round's starting point. Selecting the oldest would pick up a
+          # stale ledger and a stale round counter forever, reintroducing
+          # the duplicate-comment noise this workflow exists to remove.
+          sticky_b64=$(printf '%s' "$sticky_all" | tail -n 1 || true)
+          # All matched ids are stale by definition (fetched before this
+          # round posts its own comment) — every one of them is deleted
+          # once the new post succeeds, so a prior round's orphan gets
+          # swept up on the very next successful round instead of sitting
+          # there forever.
+          OLD_COMMENT_IDS=$(printf '%s\n' "$sticky_all" | while IFS= read -r b64; do
+            [ -n "$b64" ] || continue
+            printf '%s' "$b64" | base64 -d 2>/dev/null | jq -r '.id // empty' 2>/dev/null
+          done || true)
           COMMENT_ID=""
           ledger_json=""
           if [ -n "$sticky_b64" ]; then
@@ -1483,17 +1510,20 @@ jobs:
             echo "<sub>Advisory per-push review (round ${ROUND}) generated by ai-review — verify findings before acting.</sub>"
           } > comment.md
 
-          # Post fresh, then delete the old one (never the reverse): if the
-          # post fails, the PR keeps its previous review comment instead of
-          # ending up with none. A delete failure (e.g. the old comment was
-          # already removed by a human) is a soft warning, not a job
-          # failure — an orphaned old sticky is harmless, since the newest-
-          # wins selection above always finds this round's comment next time.
-          if gh pr comment "$PR" --body-file comment.md >/dev/null 2>&1; then
-            if [ -n "$COMMENT_ID" ]; then
-              gh api --method DELETE "repos/$GH_REPO/issues/comments/$COMMENT_ID" >/dev/null 2>&1 \
-                || echo "::warning::failed to delete previous AI review comment $COMMENT_ID"
-            fi
+          # Post fresh, then delete every old marker comment found above
+          # (never the reverse): if the post fails, the PR keeps its
+          # previous review comment(s) instead of ending up with none. A
+          # delete failure (e.g. the old comment was already removed by a
+          # human) is a soft warning, not a job failure — an orphan left
+          # behind here is swept up by this same GC on the next successful
+          # round, since OLD_COMMENT_IDS is re-collected from scratch every
+          # time and is not limited to the single most recent survivor.
+          if post_err=$(gh pr comment "$PR" --body-file comment.md 2>&1 >/dev/null); then
+            printf '%s\n' "$OLD_COMMENT_IDS" | while IFS= read -r old_id; do
+              [ -n "$old_id" ] || continue
+              gh api --method DELETE "repos/$GH_REPO/issues/comments/$old_id" >/dev/null 2>&1 \
+                || echo "::warning::failed to delete previous AI review comment $old_id"
+            done
           else
-            echo "::warning::failed to post AI review comment"
+            echo "::warning::failed to post AI review comment: $(printf '%s' "$post_err" | tr '\n' ' ' | cut -c1-300)"
           fi

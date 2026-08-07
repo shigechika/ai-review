@@ -25,12 +25,19 @@ engine:
 4. Posts **one sticky comment** per PR at a time with a one-line verdict, the
    surviving findings, and a machine-readable **findings ledger** that
    carries per-finding status (`open`/`fixed`/`dismissed`) across rounds —
-   settled points are never re-argued. Each round posts a fresh comment at
-   the bottom of the PR and removes the previous one, so the current review
-   state is always the last comment in the thread.
+   settled points are never re-argued. Every round that actually reviews
+   (see below for the pushes that don't) posts a fresh comment at the
+   bottom of the PR and removes the earlier one(s), so the current review
+   state is always the most recent `ai-review` comment in the thread —
+   though not necessarily the very last comment overall, since a skipped
+   push posts nothing and human comments made afterward can land below it.
+   Because every non-skipped round posts a brand-new comment rather than
+   editing one in place, PR subscribers get a notification on every such
+   round, not just the first.
 5. On later pushes, reviews only the **new commits** (delta rounds via the
-   compare API), skips docs-only pushes to code PRs, and degrades safely to
-   a full-diff round whenever the delta is incomplete.
+   compare API), and **skips posting entirely** for docs-only pushes to
+   code PRs or a head already reviewed, degrading safely to a full-diff
+   round whenever the delta is incomplete.
 6. A **documentation-only PR** switches to docs-mode: documentation
    accuracy becomes the review subject, and source files the docs cite are
    attached (at the PR head) as evidence, so claims about signatures,
