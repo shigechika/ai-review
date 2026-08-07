@@ -19,10 +19,19 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
-      - name: Run actionlint
+      - name: Install actionlint
+        # Direct release download, not the upstream install script — that
+        # script's own `curl -L` has no --max-time/--retry, so a stalled
+        # connection to GitHub's release CDN hangs forever with nothing to
+        # recover it except the job timeout above (observed in practice).
+        # Pinned version + explicit timeout/retry here instead.
         run: |
-          bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
-          ./actionlint -color
+          curl -fsSL --max-time 60 --retry 3 --retry-all-errors \
+            -o actionlint.tar.gz \
+            https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz
+          tar xzf actionlint.tar.gz actionlint
+      - name: Run actionlint
+        run: ./actionlint -color
 
   unit-tests:
     runs-on: ubuntu-latest
