@@ -213,8 +213,9 @@ t "engine: sticky_all is read with a trailing newline (no dropped last line)" "y
 
 # Mirrors _gc_stale_stickies's keep-id filter (see the engine's "Sticky
 # comment + findings ledger" section): every id in OLD_COMMENT_IDS is a
-# delete target EXCEPT the one matching keep_id. #26 review: this function
-# has to run on skip paths too, not only the full-review post-then-delete
+# delete target EXCEPT the one matching keep_id. Found by /code-review on
+# merged #24: this function has to run on skip paths too, not only the
+# full-review post-then-delete
 # step, so an orphan left by a prior round's failed/racing delete gets
 # swept up on the very next round regardless of whether that round posts
 # anything new.
@@ -238,9 +239,9 @@ t "gc-filter: empty OLD_COMMENT_IDS -> nothing to delete" \
 
 # Structural check: every skip-path `exit 0` (already-reviewed, no-file-
 # -changes, docs-only-delta) in the real engine must call
-# _gc_stale_stickies immediately before exiting — the #26 review finding
-# was that these paths bypassed cleanup entirely, so a fix that adds the
-# call in one spot but not the others silently regresses the other two.
+# _gc_stale_stickies immediately before exiting — /code-review on merged
+# #24 found that these paths bypassed cleanup entirely, so a fix that adds
+# the call in one spot but not the others silently regresses the other two.
 skip_exit_count=$(grep -c '^ *exit 0$' "$ENGINE")
 gc_before_skip_exit=$(awk '
   /_gc_stale_stickies/ { pending = 1; next }

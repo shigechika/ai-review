@@ -29,7 +29,7 @@ name: AI review
 #     only the next round that runs a full review. Without that, an
 #     orphan from a failed delete would sit on the PR through merge
 #     whenever every remaining push before merge is docs-only or
-#     already-reviewed (#26 review finding). Posting a fresh comment on every
+#     already-reviewed (found by /code-review on merged #24). Posting a fresh comment on every
 #     non-skipped push also means every push now notifies PR subscribers,
 #     unlike the previous edit-in-place behavior, which was silent. A
 #     machine-readable findings ledger rides inside it, base64-
@@ -321,7 +321,7 @@ jobs:
           # merge is docs-only, already-reviewed, or otherwise skipped, that
           # orphan sat on the PR through merge, which is exactly the "scroll
           # back to find the current state" confusion post-then-delete
-          # exists to eliminate (#26 review finding). Calling this on every
+          # exists to eliminate (found by /code-review on merged #24). Calling this on every
           # round, skipped or not, is what makes self-healing actually
           # unconditional rather than contingent on a full review happening.
           _gc_stale_stickies() {
