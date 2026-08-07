@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.0](https://github.com/shigechika/ai-review/compare/v1.1.3...v1.2.0) (2026-08-07)
+
+
+### Features
+
+* repost the sticky comment at the bottom instead of editing in place ([#24](https://github.com/shigechika/ai-review/issues/24)) ([3278cc0](https://github.com/shigechika/ai-review/commit/3278cc01c84798472d25f498d929482a7454876a))
+
 ## [1.1.3](https://github.com/shigechika/ai-review/compare/v1.1.2...v1.1.3) (2026-08-07)
 
 
