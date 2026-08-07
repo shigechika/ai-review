@@ -41,7 +41,7 @@ jobs:
       # `on: release` workflow because releases created with GITHUB_TOKEN
       # cannot trigger other workflows (GitHub's recursion-prevention
       # rule), which would leave the major tag stuck on the old release.
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         if: ${{ steps.rp.outputs.release_created }}
         with:
           fetch-depth: 0
