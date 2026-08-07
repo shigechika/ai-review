@@ -26,9 +26,44 @@ import yaml
 WORKFLOWS_DIR = pathlib.Path(".github/workflows")
 
 
-def default_shell_is_bash(shell: str | None) -> bool:
+class _Loader(yaml.SafeLoader):
+    """PyYAML's default resolver follows YAML 1.1, where unquoted
+    yes/no/on/off/y/n (any case) parse as booleans -- notoriously including
+    a bare `on:` key at the top of every workflow file. An env: block key
+    or value spelled that way (e.g. `NO: "1"`) silently becomes the Python
+    bool False rather than the string "NO", which crashes sorted() on a
+    mixed str/bool key set and would produce the wrong placeholder name
+    even if it did not crash. GitHub Actions itself treats these as plain
+    strings, so drop the bool resolver entirely -- true/false (and case
+    variants) are the only workflow fields this script reads as actual
+    booleans (none), so nothing here relies on it either way.
+    """
+
+
+_Loader.yaml_implicit_resolvers = {
+    first_char: [
+        (tag, regexp)
+        for tag, regexp in resolvers
+        if tag != "tag:yaml.org,2002:bool"
+    ]
+    for first_char, resolvers in yaml.SafeLoader.yaml_implicit_resolvers.items()
+}
+
+
+def effective_default_shell(workflow_defaults: dict | None, job_defaults: dict | None) -> str | None:
+    # Job-level defaults.run.shell overrides the workflow-level one; either
+    # can set a non-bash default (e.g. python, pwsh) for every step in
+    # scope that omits its own shell:.
+    for defaults in (job_defaults, workflow_defaults):
+        if defaults and (shell := defaults.get("run", {}).get("shell")):
+            return shell
+    return None
+
+
+def step_is_bash(step: dict, default_shell: str | None) -> bool:
+    shell = step.get("shell") or default_shell
     # GitHub Actions' own default on ubuntu-latest is bash; only "bash" and
-    # unset should be shellchecked (pwsh/python/etc. steps are not shell).
+    # unset-with-no-python/pwsh/etc. default should be shellchecked.
     return shell is None or shell == "bash"
 
 
@@ -36,22 +71,27 @@ def env_keys(*envs: dict | None) -> set[str]:
     keys: set[str] = set()
     for env in envs:
         if env:
-            keys.update(env.keys())
+            keys.update(str(k) for k in env.keys())
     return keys
 
 
 def main() -> int:
     failed = False
-    for path in sorted(WORKFLOWS_DIR.glob("*.yml")):
-        data = yaml.safe_load(path.read_text())
+    for path in sorted(
+        p for ext in ("*.yml", "*.yaml") for p in WORKFLOWS_DIR.glob(ext)
+    ):
+        data = yaml.load(path.read_text(), Loader=_Loader)
         workflow_env = (data or {}).get("env")
+        workflow_defaults = (data or {}).get("defaults")
         jobs = (data or {}).get("jobs") or {}
         for job_name, job in jobs.items():
             job_env = job.get("env")
+            job_defaults = job.get("defaults")
+            default_shell = effective_default_shell(workflow_defaults, job_defaults)
             steps = job.get("steps") or []
             for i, step in enumerate(steps):
                 run = step.get("run")
-                if not run or not default_shell_is_bash(step.get("shell")):
+                if not run or not step_is_bash(step, default_shell):
                     continue
                 step_label = step.get("name", f"step {i}")
                 # GitHub Actions injects env:-block keys as real environment
