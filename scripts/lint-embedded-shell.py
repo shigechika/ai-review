@@ -88,6 +88,22 @@ def step_is_bash(step: dict, default_shell: str | None) -> bool:
 
 _BASH_IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
+# GitHub Actions substitutes ${{ ... }} expressions into the script text
+# BEFORE bash ever sees it -- it isn't bash syntax at all (it commonly
+# appears inside a quoted string like "${{ github.ref }}", which shellcheck
+# reads as an invalid parameter expansion starting with `{` and rejects
+# with SC2296, failing a step that is valid GitHub Actions workflow syntax
+# and would run correctly in practice). actionlint's own shellcheck
+# integration masks these before handing the script to shellcheck; do the
+# same with a bash-safe placeholder. Contents of the expression don't
+# matter here -- actionlint's own -shellcheck= run in ci.yml (not this
+# script) is what validates expression syntax itself.
+_GHA_EXPRESSION = re.compile(r"\$\{\{.*?\}\}", re.DOTALL)
+
+
+def mask_gha_expressions(script: str) -> str:
+    return _GHA_EXPRESSION.sub("GHA_EXPR", script)
+
 
 def env_keys(*envs: dict | None) -> set[str]:
     # A workflow's env: key only has to be a valid YAML mapping key -- it
@@ -142,7 +158,8 @@ def main() -> int:
                 declares = "\n".join(f"{name}=''" for name in keys)
                 if declares:
                     declares = "# shellcheck disable=SC2034\n" + declares
-                script = (declares + "\n" + run) if declares else run
+                masked_run = mask_gha_expressions(run)
+                script = (declares + "\n" + masked_run) if declares else masked_run
                 with tempfile.NamedTemporaryFile(
                     mode="w", suffix=".sh", delete=False
                 ) as tf:
