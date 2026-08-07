@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.1.3](https://github.com/shigechika/ai-review/compare/v1.1.2...v1.1.3) (2026-08-07)
+
+
+### Bug Fixes
+
+* add timeout-minutes to CI jobs to prevent silent multi-hour hangs ([#18](https://github.com/shigechika/ai-review/issues/18)) ([850e242](https://github.com/shigechika/ai-review/commit/850e242bfdcbb0766679e69b09630b50fb844fc4))
+* mask GitHub Actions expressions before shellchecking (PR [#17](https://github.com/shigechika/ai-review/issues/17) finding) ([#22](https://github.com/shigechika/ai-review/issues/22)) ([eb6415f](https://github.com/shigechika/ai-review/commit/eb6415f62bb49554dedb6bb3adea8c49b69eb3c3))
+* replace actionlint's install script with a bounded direct download ([#20](https://github.com/shigechika/ai-review/issues/20)) ([bb3315d](https://github.com/shigechika/ai-review/commit/bb3315d14103aeb9c8d9dc04bb345454983c60c5))
+* surface malformed severity lines in the rendered review comment ([#17](https://github.com/shigechika/ai-review/issues/17)) ([3ab6dd4](https://github.com/shigechika/ai-review/commit/3ab6dd442d6a7905fe3ae161e8f4b784e0db561e))
+* work around actionlint's shellcheck-integration deadlock ([#21](https://github.com/shigechika/ai-review/issues/21)) ([7ceb1f4](https://github.com/shigechika/ai-review/commit/7ceb1f4267a4cd2d70cbf13974d6087a011fe0bd))
+
 ## [1.1.2](https://github.com/shigechika/ai-review/compare/v1.1.1...v1.1.2) (2026-08-06)
 
 
