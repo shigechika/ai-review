@@ -22,10 +22,12 @@ engine:
    format.
 3. Runs a second, cheap **verifier call** that tries to refute each candidate
    finding; refuted ones are dropped before anything is posted.
-4. Posts (or updates) **one sticky comment** per PR with a one-line verdict,
-   the surviving findings, and a machine-readable **findings ledger** that
+4. Posts **one sticky comment** per PR at a time with a one-line verdict, the
+   surviving findings, and a machine-readable **findings ledger** that
    carries per-finding status (`open`/`fixed`/`dismissed`) across rounds —
-   settled points are never re-argued.
+   settled points are never re-argued. Each round posts a fresh comment at
+   the bottom of the PR and removes the previous one, so the current review
+   state is always the last comment in the thread.
 5. On later pushes, reviews only the **new commits** (delta rounds via the
    compare API), skips docs-only pushes to code PRs, and degrades safely to
    a full-diff round whenever the delta is incomplete.
