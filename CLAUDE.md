@@ -41,9 +41,8 @@ engine ships to all of them at once — treat edits accordingly.
   comments inside the jq programs) — an apostrophe ends the string.
   `tests/test_ledger.sh` asserts the extracted jq programs contain zero
   apostrophes; this rule has been violated twice DESPITE being documented
-  here, both times caught only by that assertion (or by `actionlint`'s
-  shellcheck integration) — do not trust memory or review alone for this
-  one, run the tests.
+  here, both times caught only by that assertion (or by shellcheck) — do
+  not trust memory or review alone for this one, run the tests.
 - Byte caps are named in one block ("Byte caps") — change budgets there,
   and keep the header comment's arithmetic in sync.
 - Truncation must be labelled: a clamped attachment gets the `TRUNCATED`
@@ -65,7 +64,15 @@ engine ships to all of them at once — treat edits accordingly.
   for every bug this engine's own selftest finds in itself — that is how
   the severity-corroboration regression (found on PR #9's own selftest)
   became a permanent test instead of a one-off fix.
-- `actionlint` at the repo root (CI runs it with shellcheck available).
+- `actionlint -shellcheck=` at the repo root, plus
+  `python3 scripts/lint-embedded-shell.py` for the shellcheck pass.
+  actionlint's own built-in shellcheck integration is disabled — it has a
+  known, unfixed upstream deadlock on any `run:` block over 65536 bytes
+  (rhysd/actionlint#712), which this repo's largest step is close enough
+  to that it has hung CI for hours in practice. The Python script
+  shellchecks every `run:` block as a file instead (not over stdin),
+  which doesn't hit the same bug; run both locally before every PR, same
+  as CI's `actionlint` job does.
 - Extract the run block from the YAML and `bash -n` it.
 - The selftest workflow reviews every PR with the PR's **own** engine
   revision (relative `uses:`), so open a PR and read the sticky comment +
