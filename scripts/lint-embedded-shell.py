@@ -6,17 +6,32 @@ Works around a known, unfixed actionlint bug (rhysd/actionlint#712):
 actionlint's built-in shellcheck integration writes a run: block's script to
 the shellcheck subprocess's stdin pipe before it starts draining stdout, and
 deadlocks forever once the script exceeds the OS pipe buffer (65536 bytes on
-Linux) -- this repo's own "Request AI review" step is 67139 bytes, just over
-that threshold. actionlint's own maintainer-confirmed workaround (per the
-issue) is to disable the integration (`-shellcheck=`) and shellcheck each
-run: block as a file instead, which is what this script does.
+Linux). This repo's own "Request AI review" step sits close enough to that
+threshold that it crosses it as the engine grows -- confirmed to trigger the
+hang in practice (a 67139-byte revision of that step hung actionlint for
+2+ hours in CI before this workaround existed; the exact byte count moves
+with every edit to that step, so don't trust a stale number here -- measure
+the live file with `len(run.encode("utf-8"))` if you need to know whether a
+given revision is over or under). actionlint's own maintainer-confirmed
+workaround (per the issue) is to disable the integration (`-shellcheck=`)
+and shellcheck each run: block as a file instead, which is what this script
+does.
 
 actionlint itself (workflow structure, expression syntax, etc.) still runs
 separately with -shellcheck= in ci.yml; this script covers exactly what that
 flag turns off.
+
+This is this repo's first Python dependency (PyYAML). tests/lib.sh's own
+extract_run() deliberately avoids one -- its comment notes a plain awk/sed
+dedent was verified byte-identical to a PyYAML parse specifically so CI
+would not need a YAML library. That held for extracting one hardcoded
+block; it does not extend to this script's job, which needs real parsed
+structure (env:/defaults: at three scope levels, per-step shell:) across
+every workflow file, not a single block's text.
 """
 
 import pathlib
+import re
 import subprocess
 import sys
 import tempfile
@@ -71,11 +86,24 @@ def step_is_bash(step: dict, default_shell: str | None) -> bool:
     return shell.split()[0] == "bash" if shell.strip() else False
 
 
+_BASH_IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
 def env_keys(*envs: dict | None) -> set[str]:
+    # A workflow's env: key only has to be a valid YAML mapping key -- it
+    # can be referenced entirely through `${{ env.FOO-BAR }}` expression
+    # syntax without ever touching bash's $VAR syntax, so GitHub Actions
+    # doesn't require it to be a legal shell identifier. This script's own
+    # synthetic `NAME=''` placeholder line does need one, though -- a name
+    # with e.g. a hyphen or leading digit produces invalid bash on the
+    # declaration line itself (shellcheck SC2276/SC2282), which would fail
+    # the step for a reason having nothing to do with the workflow author's
+    # actual script. Names that can't be a shell identifier are dropped
+    # instead: nothing in real bash could have referenced them anyway.
     keys: set[str] = set()
     for env in envs:
         if env:
-            keys.update(str(k) for k in env.keys())
+            keys.update(str(k) for k in env.keys() if _BASH_IDENTIFIER.match(str(k)))
     return keys
 
 
@@ -105,10 +133,12 @@ def main() -> int:
                 # own integration avoids this by passing the same context;
                 # reproduce it here with harmless placeholder assignments.
                 keys = sorted(env_keys(workflow_env, job_env, step.get("env")))
-                # SC2034 (appears unused): some of these (GH_TOKEN, GH_REPO)
-                # are read implicitly by external commands (gh) rather than
-                # referenced in the script text -- expected for a synthetic
-                # placeholder declaration whose only job is to exist.
+                # SC2034 (appears unused): some of these (e.g. GH_TOKEN,
+                # which `gh` reads from its own environment) are never
+                # referenced as $NAME anywhere in the script text at all --
+                # expected for a synthetic placeholder declaration whose
+                # only job is to exist so real references to OTHER env:
+                # keys don't false-positive as unassigned/typo'd.
                 declares = "\n".join(f"{name}=''" for name in keys)
                 if declares:
                     declares = "# shellcheck disable=SC2034\n" + declares

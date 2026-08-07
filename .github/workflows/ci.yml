@@ -34,13 +34,16 @@ jobs:
         # -shellcheck= disables actionlint's built-in shellcheck integration.
         # It has a known, unfixed upstream deadlock (rhysd/actionlint#712):
         # a run: block whose script exceeds the OS pipe buffer (65536 bytes)
-        # hangs the process forever. This repo's own "Request AI review"
-        # step is 67139 bytes, just over that threshold — hit twice in
+        # hangs the process forever. This repo's largest step sits close
+        # enough to that threshold to cross it as the engine grows — hit in
         # practice as a silent multi-hour CI hang before being diagnosed.
         run: ./actionlint -color -shellcheck=
       - name: Shellcheck embedded run steps (file-based, avoids the pipe deadlock above)
+        # pyyaml pinned + retried for the same reason the actionlint
+        # download above is: an unbounded, unretried network call has
+        # already caused one silent multi-hour CI hang this same day.
         run: |
-          pip install --quiet pyyaml
+          pip install --quiet --retries 3 --timeout 60 "pyyaml==6.0.3"
           python3 scripts/lint-embedded-shell.py
 
   unit-tests:
