@@ -22,23 +22,22 @@ engine:
    format.
 3. Runs a second, cheap **verifier call** that tries to refute each candidate
    finding; refuted ones are dropped before anything is posted.
-4. Posts **one sticky comment** per PR at a time with a one-line verdict, the
-   surviving findings, and a machine-readable **findings ledger** that
-   carries per-finding status (`open`/`fixed`/`dismissed`) across rounds —
-   settled points are never re-argued. Every round that actually reviews
-   (see below for the pushes that don't) posts a fresh comment at the
-   bottom of the PR and removes the earlier one(s). Every round, including
-   a skipped one, also sweeps away any orphaned marker comment left by a
-   prior round's failed or racing delete — so a stale duplicate never
-   waits past the next round to be cleaned up (a delete failure only
-   warns and leaves the run block running, so a duplicate can briefly
-   exist between rounds), and the current review state is always the
-   most recent `ai-review` comment in the thread — though not
-   necessarily the very last comment overall, since
-   a skipped push posts nothing itself and human comments made afterward
-   can land below it. Because every non-skipped round posts a brand-new
-   comment rather than editing one in place, PR subscribers get a
-   notification on every such round, not just the first.
+4. Posts **one sticky comment** per PR at a time with a one-line verdict,
+   the surviving findings, and a machine-readable **findings ledger**
+   that carries per-finding status (`open`/`fixed`/`dismissed`) across
+   rounds — settled points are never re-argued. Every round that
+   actually reviews (see below for the pushes that don't) posts a fresh
+   comment at the bottom of the PR and deletes the earlier one, rather
+   than editing it in place — which is also why PR subscribers get a
+   notification on every such round, not just the first. Every round,
+   including a skipped one, also sweeps up any orphaned marker comment a
+   prior round's failed or racing delete left behind, so a duplicate
+   never survives past the next round (a delete failure only warns and
+   moves on, so one can briefly exist in between). The result: the
+   current review state is always the most recent `ai-review` comment in
+   the thread, though not necessarily the very last comment overall — a
+   skipped push posts nothing itself, so a human comment made afterward
+   can land below the sticky one.
 5. On later pushes, reviews only the **new commits** (delta rounds via the
    compare API), and **skips posting entirely** for docs-only pushes to
    code PRs or a head already reviewed, degrading safely to a full-diff
@@ -94,16 +93,19 @@ Dependabot PRs are skipped by the engine itself.
 
 3. **Optional — admission control for public repos.** `pr-gate.yml` is a
    separate reusable workflow that closes pull requests from authors who
-   are not a maintainer, member, or collaborator (with a canned comment
-   explaining why), and adds an `ai-review` label to admitted ones. It is
-   independent of `ai-review.yml` — adopting it does not change how or
-   when reviews run; it only stops spam/unsolicited PRs from sitting open
-   and adds a label you can use for your own purposes (branch protection,
-   a second workflow's trigger, etc.). It needs its own trigger — do not
-   reuse the `pull_request` trigger from step 2 above, it will not work:
-   closing or labeling a fork's PR needs a base-repo-scoped token that a
-   plain `pull_request` event never grants a fork, silently skipping this
-   job on every run instead of erroring:
+   are not a maintainer, member, or collaborator, posting a canned
+   comment that explains why, and adds an `ai-review` label to admitted
+   ones. It is independent of `ai-review.yml`: adopting it does not
+   change how or when reviews run. Its only job is to stop spam and
+   unsolicited PRs from sitting open, and to hand you a label you can
+   reuse for anything else — branch protection, a second workflow's
+   trigger, and so on.
+
+   It needs its own trigger. Do not reuse the `pull_request` trigger
+   from step 2 above — it will not work. Closing or labeling a fork's PR
+   needs a base-repo-scoped token, and a plain `pull_request` event
+   never grants a fork one; reused this way, the job doesn't error, it
+   just skips silently on every run:
 
    ```yaml
    name: PR Gate
@@ -122,18 +124,22 @@ Dependabot PRs are skipped by the engine itself.
        uses: shigechika/ai-review/.github/workflows/pr-gate.yml@v1
    ```
 
-   Trust is a single live signal — GitHub's own `author_association`
-   (`OWNER`/`MEMBER`/`COLLABORATOR`) — plus a small built-in allowlist for
-   `dependabot[bot]`/`github-actions[bot]` and same-repo
-   `release-please--*` branches, so routine dependency/release PRs are
-   never closed and never mislabeled with a review that
-   `ai-review.yml`'s own skip logic will never actually run. A rejected
-   author's own reopen is re-evaluated the same way and closes again;
-   anyone else reopening it is honored as an override, since GitHub
-   itself only lets someone with sufficient access perform that action in
-   the first place — no permission lookup needed here. Set the repository
-   variable `AI_REVIEW_DISABLE_GATE` to `true` to turn this workflow into
-   a no-op without removing the caller file.
+   Trust is a single live signal: GitHub's own `author_association`
+   (`OWNER`/`MEMBER`/`COLLABORATOR`). A few cases are handled specially:
+
+   - `dependabot[bot]`, `github-actions[bot]`, and same-repo
+     `release-please--*` branches are always exempt, so routine
+     dependency/release PRs are never closed — and never mislabeled with
+     a review that `ai-review.yml`'s own skip logic would never actually
+     run anyway.
+   - A rejected author's own reopen is re-evaluated the same way and
+     closes again. Anyone else's reopen is honored as an override
+     instead: GitHub itself only lets someone with sufficient access
+     perform that action in the first place, so no permission lookup is
+     needed here.
+
+   Set the repository variable `AI_REVIEW_DISABLE_GATE` to `true` to turn
+   this workflow into a no-op without removing the caller file.
 
 That's it.
 
