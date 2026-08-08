@@ -105,6 +105,7 @@ Dependabot の PR はエンジン側でスキップされます。
      pull_request_target:
        types: [opened, reopened, closed]
    permissions:
+     contents: read
      pull-requests: write
      issues: write
    concurrency:
