@@ -648,8 +648,6 @@ jobs:
             # The deny-list below still applies — a docs PR must not become
             # a channel for attaching secrets-shaped files.
             mv attach_list.txt attach_docs.txt
-            grep -oE '\.?[A-Za-z0-9_][A-Za-z0-9_./-]*\.(py|pyi|ts|tsx|js|mjs|go|rs|rb|java|kt|kts|c|h|cc|cpp|hpp|cs|php|swift|scala|sql|lua|sh|bash|yml|yaml|toml|cfg|json)' fulldiff.txt \
-              | sed 's#^\./##' | sort -u > tokens_raw.txt || true
             # README bilingual pair: if this PR's changed docs include
             # exactly one of the ROOT-level README.md / README.ja.md
             # (whole-line match against attach_docs.txt, so a nested
@@ -661,12 +659,23 @@ jobs:
             # goes through the same prioritized, capped, deduplicated
             # list as everything else in tokens_raw.txt, and a repo with
             # no README.ja.md just 404s in the fetch loop for free.
+            # Written FIRST, ahead of the grep-extracted source tokens
+            # below: tokens_raw.txt already routinely exceeds the 40-entry
+            # head cap (and the 15-file fetch cap further down) on a
+            # prose-heavy README that cites many source files, and an
+            # appended entry would silently lose the race for a slot —
+            # exactly the PRs most likely to also carry a real
+            # cross-language mismatch. A guaranteed-priority citation is
+            # the only way this check reliably fires.
+            : > tokens_raw.txt
             if grep -qxF 'README.md' attach_docs.txt && ! grep -qxF 'README.ja.md' attach_docs.txt; then
               echo 'README.ja.md' >> tokens_raw.txt
             fi
             if grep -qxF 'README.ja.md' attach_docs.txt && ! grep -qxF 'README.md' attach_docs.txt; then
               echo 'README.md' >> tokens_raw.txt
             fi
+            grep -oE '\.?[A-Za-z0-9_][A-Za-z0-9_./-]*\.(py|pyi|ts|tsx|js|mjs|go|rs|rb|java|kt|kts|c|h|cc|cpp|hpp|cs|php|swift|scala|sql|lua|sh|bash|yml|yaml|toml|cfg|json)' fulldiff.txt \
+              | sed 's#^\./##' | sort -u >> tokens_raw.txt || true
             # Docs cite paths relative to THEIR OWN directory as often as to
             # the repo root: `./client.py` inside docs/guide.md usually
             # means docs/client.py, which a root-anchored fetch would 404
