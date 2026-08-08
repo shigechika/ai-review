@@ -83,8 +83,49 @@ PR ごと（caller が `synchronize` を有効にしていれば push ごと）�
    push ごとではなく PR ごとに1回のレビューにしたい場合は、`types` から
    `synchronize` を外してください。
 
-これだけです。Draft PR・`release-please--*` ブランチ・Dependabot の PR は
-エンジン側でスキップされます。
+レビュー自体はこれで完成です。Draft PR・`release-please--*` ブランチ・
+Dependabot の PR はエンジン側でスキップされます。
+
+3. **任意 — 公開リポジトリ向けの受け入れ管理。** `pr-gate.yml` は独立した
+   別のreusable workflowで、maintainer・member・collaboratorのいずれでも
+   ない作成者からのPRを定型コメント付きでクローズし、通過したPRには
+   `ai-review` ラベルを付与します。`ai-review.yml`とは独立しています —
+   導入してもレビューの動作・タイミングは一切変わりません。スパム/
+   勧誘目的の未承諾PRが開いたまま残るのを防ぎ、付与されたラベルは
+   任意の用途（branch protection、別workflowのトリガー等）に使えます。
+   専用のトリガーが必要です — **上のstep 2の`pull_request`トリガーを
+   流用しないでください、動作しません**: フォークのPRをクローズ・
+   ラベル付けするにはbase repo権限を持つtokenが必要ですが、通常の
+   `pull_request`イベントはフォークに対してread-onlyのtokenしか渡さない
+   ため、エラーにすらならず毎回このjobがサイレントにスキップされます:
+
+   ```yaml
+   name: PR Gate
+   on:
+     pull_request_target:
+       types: [opened, reopened, closed]
+   permissions:
+     pull-requests: write
+     issues: write
+   concurrency:
+     group: pr-gate-${{ github.event.pull_request.number }}
+     cancel-in-progress: false
+   jobs:
+     gate:
+       uses: shigechika/ai-review/.github/workflows/pr-gate.yml@v1
+   ```
+
+   信頼判定はGitHub組み込みの `author_association`
+   （`OWNER`/`MEMBER`/`COLLABORATOR`）という単一のライブな指標のみを使い、
+   `dependabot[bot]`/`github-actions[bot]` は組み込みの許可リストで
+   常に除外され、通常のメンテナンスPRがクローズされることはありません。
+   却下された作成者自身によるreopenは同じ判定が再実行され再度クローズ
+   されますが、maintainer（またはTriageロールのcollaborator）による
+   reopenは尊重されます。リポジトリ変数 `AI_REVIEW_DISABLE_GATE` を
+   `true` にすると、callerファイルを残したままこのworkflowを
+   無効化できます。
+
+これだけです。
 
 ## 動作確認
 

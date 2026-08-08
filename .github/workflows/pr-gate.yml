@@ -1,0 +1,223 @@
+name: PR Gate
+
+# Reusable admission control for pull requests. Meant to run ALONGSIDE
+# ai-review.yml (see README "Quick start"), never merged into it — the two
+# files have deliberately different threat models and stay apart on
+# purpose:
+#
+#   * ai-review.yml is advisory-only and never wired to pull_request_target
+#     (see its own header comment) — every failure path soft-fails, and it
+#     never mutates PR state beyond one sticky comment.
+#   * pr-gate.yml is the opposite by design: it DOES use
+#     pull_request_target, and it DOES take a blocking action (closing the
+#     pull request) when the author is not trusted. A base-repo-scoped
+#     token is unavoidable here — closing/labeling a PR is a write, and a
+#     plain pull_request event from a fork always gets a read-only
+#     GITHUB_TOKEN regardless of the permissions: block, by GitHub design.
+#     The usual pull_request_target caution therefore applies: this file
+#     must never check out PR content or run anything the PR authored.
+#
+# Trust is a single live signal — GitHub's own author_association on the
+# pull request (OWNER/MEMBER/COLLABORATOR) — plus a small hardcoded
+# allowlist for this repository's own automation accounts (dependabot[bot],
+# github-actions[bot]) so routine dependency/release PRs are never
+# auto-closed. There is no maintained allowlist file to go stale: every
+# check reads a value GitHub computes live from current repo permissions.
+# A CONTRIBUTOR (has had a PR merged before, but holds no standing write
+# access) is deliberately NOT trusted — only a maintainer reopening the
+# closed PR admits them.
+#
+# On success this workflow adds the ai-review label (configurable via
+# review-label) and nothing else — it never posts findings and never
+# touches the AI_REVIEW_ENDPOINT/AI_REVIEW_API_KEY secrets ai-review.yml
+# uses, because it never needs them. Callers are expected to gate their
+# ai-review job on that same label if they want the two workflows to
+# compose (see the README recipe); this file has no opinion on how the
+# label is consumed downstream.
+
+on:
+  workflow_call:
+    inputs:
+      review-label:
+        description: "Label added to admitted pull requests (default: ai-review)"
+        type: string
+        required: false
+        default: "ai-review"
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    if: >-
+      github.event_name == 'pull_request_target' &&
+      vars.AI_REVIEW_DISABLE_GATE != 'true'
+    steps:
+      - name: Admit or close based on author trust
+        uses: actions/github-script@v9
+        env:
+          REVIEW_LABEL: ${{ inputs.review-label }}
+        with:
+          script: |
+            // REVIEW_LABEL travels through env, not string-interpolated
+            // into the script body — this is untrusted-adjacent code (a
+            // pull_request_target run), so no PR-influenced or
+            // caller-influenced value is ever spliced into the JS source
+            // itself.
+            const REVIEW_LABEL = process.env.REVIEW_LABEL;
+            const GATE_MARKER = "<!-- ai-review-pr-gate -->";
+
+            // First-party automation for this repository — never
+            // auto-closed, regardless of what ai-review.yml itself does
+            // or does not skip (it only excludes dependabot[bot] via its
+            // own job condition, not github-actions[bot] — do not assume
+            // parity between the two lists). release-please and similar
+            // repo-owned automation open PRs as github-actions[bot]; those
+            // must stay open too.
+            const TRUSTED_BOTS = new Set(["dependabot[bot]", "github-actions[bot]"]);
+
+            // GitHub-computed, cannot be spoofed by the PR author and
+            // never goes stale the way a hand-maintained file would.
+            // CONTRIBUTOR (merged before, no standing write access) is
+            // deliberately excluded — only a maintainer's reopen admits
+            // one of these.
+            const TRUSTED_ASSOCIATIONS = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
+
+            const pr = context.payload.pull_request;
+            const author = pr.user.login;
+            const association = pr.author_association;
+            const pullNumber = pr.number;
+
+            // No precheck of current labels here: addLabels is idempotent
+            // (re-adding a label already present is a harmless no-op, not
+            // an error), and removeLabel below already tolerates a 404
+            // (label already absent) the same way. A precheck-then-act
+            // would only add a paginated fetch and a race window between
+            // the read and the write, for no correctness benefit.
+            async function addReviewLabel() {
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: pullNumber,
+                labels: [REVIEW_LABEL],
+              });
+            }
+
+            async function removeReviewLabel() {
+              try {
+                await github.rest.issues.removeLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: pullNumber,
+                  name: REVIEW_LABEL,
+                });
+              } catch (error) {
+                if (error.status !== 404) throw error;
+              }
+            }
+
+            // Edits the existing comment in place — the opposite of
+            // ai-review.yml's own repost-then-delete sticky comment
+            // (deliberately changed to repost, since GitHub never
+            // notifies watchers on an edit). That's safe here only
+            // because the rejection message below is static, so this
+            // rarely does more than the identical-body short-circuit;
+            // if this message is ever made to vary per run, revisit
+            // whether a silent edit is still the right call.
+            async function upsertGateComment(message) {
+              const comments = await github.paginate(github.rest.issues.listComments, {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: pullNumber,
+                per_page: 100,
+              });
+              const body = `${GATE_MARKER}\n${message}`;
+              // Matched by THIS workflow's own posting identity
+              // (github-actions[bot], via the default GITHUB_TOKEN), not
+              // any bot — a generic "type === Bot" match could pick up
+              // and silently overwrite a comment from a different bot/app
+              // that happens to contain the marker text.
+              const existing = comments.find(
+                (comment) => comment.user?.login === "github-actions[bot]" && comment.body?.includes(GATE_MARKER)
+              );
+              if (existing?.body === body) return;
+              if (existing) {
+                await github.rest.issues.updateComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  comment_id: existing.id,
+                  body,
+                });
+                return;
+              }
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: pullNumber,
+                body,
+              });
+            }
+
+            // closed: keep label state honest, nothing else to decide.
+            // (Note: this branch never fires for a close performed by
+            // THIS workflow's own GITHUB_TOKEN — GitHub does not re-fire
+            // events caused by the default token, to prevent recursive
+            // runs. Harmless here since the rejection path below already
+            // removes the label itself before closing.)
+            if (context.payload.action === "closed") {
+              await removeReviewLabel();
+              return;
+            }
+
+            if (TRUSTED_BOTS.has(author)) {
+              core.info(`Leaving bot-authored PR open, ungated: ${author}`);
+              return;
+            }
+
+            // A closed PR can only be reopened by its author or someone
+            // GitHub itself has authorized to do so (write, Triage, any
+            // custom role derived from either, or whatever access model
+            // GitHub adds next) — that check already happened, by GitHub,
+            // before this event could fire at all. So rather than
+            // re-deriving the same authorization decision from
+            // permission/role_name heuristics (three rounds of this
+            // repo's own selftest each found a different custom-role
+            // shape those fields miss — see CLAUDE.md), trust the fact
+            // that reopening SUCCEEDED: if whoever did it is not the
+            // PR's own author, GitHub already vetted them. Falls through
+            // to the normal check when the author reopened their own
+            // rejected PR (GitHub always allows that, trusted or not),
+            // so enforcement stays consistent instead of being undone by
+            // the same untrusted actor re-clicking reopen.
+            if (context.payload.action === "reopened") {
+              const senderLogin = context.payload.sender?.login;
+              if (senderLogin && senderLogin !== author) {
+                core.info(`${senderLogin} reopened PR #${pullNumber} (not the PR author) — honoring the override`);
+                await addReviewLabel();
+                return;
+              }
+            }
+
+            if (TRUSTED_ASSOCIATIONS.has(association)) {
+              core.info(`${author} is trusted (author_association=${association})`);
+              await addReviewLabel();
+              return;
+            }
+
+            core.info(`${author} is not a trusted author (author_association=${association}) — closing PR #${pullNumber}`);
+            await removeReviewLabel();
+            await upsertGateComment(
+              [
+                `Hi @${author}, thanks for your interest in contributing.`,
+                "",
+                "This repository only runs automated review on pull requests from maintainers, " +
+                  "collaborators, or members — a requirement this pull request does not currently meet.",
+                "",
+                "If a maintainer wants to accept this contribution, reopening the pull request will " +
+                  "leave it open and admit it for review.",
+              ].join("\n")
+            );
+            await github.rest.pulls.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: pullNumber,
+              state: "closed",
+            });

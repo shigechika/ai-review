@@ -87,8 +87,48 @@ can never block a PR.
    Drop `synchronize` from `types` if you want one review per PR instead of
    one per push.
 
-That's it. Draft PRs, `release-please--*` branches and Dependabot PRs are
-skipped by the engine itself.
+That covers review itself. Draft PRs, `release-please--*` branches and
+Dependabot PRs are skipped by the engine itself.
+
+3. **Optional — admission control for public repos.** `pr-gate.yml` is a
+   separate reusable workflow that closes pull requests from authors who
+   are not a maintainer, member, or collaborator (with a canned comment
+   explaining why), and adds an `ai-review` label to admitted ones. It is
+   independent of `ai-review.yml` — adopting it does not change how or
+   when reviews run; it only stops spam/unsolicited PRs from sitting open
+   and adds a label you can use for your own purposes (branch protection,
+   a second workflow's trigger, etc.). It needs its own trigger — do not
+   reuse the `pull_request` trigger from step 2 above, it will not work:
+   closing or labeling a fork's PR needs a base-repo-scoped token that a
+   plain `pull_request` event never grants a fork, silently skipping this
+   job on every run instead of erroring:
+
+   ```yaml
+   name: PR Gate
+   on:
+     pull_request_target:
+       types: [opened, reopened, closed]
+   permissions:
+     pull-requests: write
+     issues: write
+   concurrency:
+     group: pr-gate-${{ github.event.pull_request.number }}
+     cancel-in-progress: false
+   jobs:
+     gate:
+       uses: shigechika/ai-review/.github/workflows/pr-gate.yml@v1
+   ```
+
+   Trust is a single live signal — GitHub's own `author_association`
+   (`OWNER`/`MEMBER`/`COLLABORATOR`) — plus a small built-in allowlist for
+   `dependabot[bot]`/`github-actions[bot]` so routine maintenance PRs are
+   never closed. A rejected author's own reopen is re-evaluated the same
+   way and closes again; a maintainer's (or Triage-role collaborator's)
+   reopen is honored instead. Set the repository variable
+   `AI_REVIEW_DISABLE_GATE` to `true` to turn this workflow into a no-op
+   without removing the caller file.
+
+That's it.
 
 ## Verifying your setup
 
