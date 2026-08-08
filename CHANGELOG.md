@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.1](https://github.com/shigechika/ai-review/compare/v1.3.0...v1.3.1) (2026-08-08)
+
+
+### Bug Fixes
+
+* add explicit contents: read to the pr-gate.yml caller recipe ([#31](https://github.com/shigechika/ai-review/issues/31)) ([4796658](https://github.com/shigechika/ai-review/commit/4796658b629ddb1f42c1cfa5dbe47e6282f3ab76))
+
 ## [1.3.0](https://github.com/shigechika/ai-review/compare/v1.2.1...v1.3.0) (2026-08-08)
 
 
