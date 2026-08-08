@@ -33,7 +33,10 @@ name: PR Gate
 # uses, because it never needs them. Callers are expected to gate their
 # ai-review job on that same label if they want the two workflows to
 # compose (see the README recipe); this file has no opinion on how the
-# label is consumed downstream.
+# label is consumed downstream. Same-repo release-please branches never
+# get the label at all, even though they are trusted — ai-review.yml's
+# own job condition already skips them unconditionally, so labeling one
+# would just be a misleading promise of a review that will never happen.
 
 on:
   workflow_call:
@@ -169,6 +172,25 @@ jobs:
 
             if (TRUSTED_BOTS.has(author)) {
               core.info(`Leaving bot-authored PR open, ungated: ${author}`);
+              return;
+            }
+
+            // Same-repo release-please branches are never actually
+            // reviewed — ai-review.yml's own job condition skips them
+            // unconditionally, regardless of author or label. Labeling
+            // one here would be misleading (the label implies a review
+            // is coming; for this PR shape, one never will) even though
+            // the PR is legitimately trusted (release-please usually
+            // opens as the repo owner or a first-party token, so it
+            // would otherwise sail through the TRUSTED_ASSOCIATIONS
+            // check below). Mirrors ai-review.yml's own
+            // release-please--* / same-repo condition exactly.
+            const headRef = pr.head?.ref ?? "";
+            const isReleasePleaseBranch =
+              pr.head?.repo?.full_name === `${context.repo.owner}/${context.repo.repo}` &&
+              headRef.startsWith("release-please--");
+            if (isReleasePleaseBranch) {
+              core.info(`Leaving release-please PR open, ungated: ${headRef}`);
               return;
             }
 

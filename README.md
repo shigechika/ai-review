@@ -121,12 +121,16 @@ Dependabot PRs are skipped by the engine itself.
 
    Trust is a single live signal — GitHub's own `author_association`
    (`OWNER`/`MEMBER`/`COLLABORATOR`) — plus a small built-in allowlist for
-   `dependabot[bot]`/`github-actions[bot]` so routine maintenance PRs are
-   never closed. A rejected author's own reopen is re-evaluated the same
-   way and closes again; a maintainer's (or Triage-role collaborator's)
-   reopen is honored instead. Set the repository variable
-   `AI_REVIEW_DISABLE_GATE` to `true` to turn this workflow into a no-op
-   without removing the caller file.
+   `dependabot[bot]`/`github-actions[bot]` and same-repo
+   `release-please--*` branches, so routine dependency/release PRs are
+   never closed and never mislabeled with a review that
+   `ai-review.yml`'s own skip logic will never actually run. A rejected
+   author's own reopen is re-evaluated the same way and closes again;
+   anyone else reopening it is honored as an override, since GitHub
+   itself only lets someone with sufficient access perform that action in
+   the first place — no permission lookup needed here. Set the repository
+   variable `AI_REVIEW_DISABLE_GATE` to `true` to turn this workflow into
+   a no-op without removing the caller file.
 
 That's it.
 
