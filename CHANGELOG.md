@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.3.0](https://github.com/shigechika/ai-review/compare/v1.2.1...v1.3.0) (2026-08-08)
+
+
+### Features
+
+* add pr-gate.yml, admission control for unsolicited PRs ([#28](https://github.com/shigechika/ai-review/issues/28)) ([92d68db](https://github.com/shigechika/ai-review/commit/92d68db513f261ae13a4809caea5c5433282b1fd))
+
+
+### Bug Fixes
+
+* don't label same-repo release-please PRs in pr-gate.yml ([#30](https://github.com/shigechika/ai-review/issues/30)) ([6dcb2c7](https://github.com/shigechika/ai-review/commit/6dcb2c7b047b8b8fcfe9be29c416ac027a4fd259))
+
 ## [1.2.1](https://github.com/shigechika/ai-review/compare/v1.2.0...v1.2.1) (2026-08-08)
 
 
