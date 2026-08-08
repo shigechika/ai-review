@@ -85,15 +85,20 @@ set — see "pr-gate.yml invariants" below.
   page, not assumption) that the caller repo has enabled a non-default
   "send secrets to fork PR workflows" policy, since that is the only
   situation where the coupling would actually save anything.
-- **Use `role_name`, not `permission`, from `getCollaboratorPermissionLevel`.**
-  The legacy `permission` field only ever returns
-  `admin`/`write`/`read`/`none` — it collapses Maintain into `write` and
-  Triage into `read`, which would make a Triage-role collaborator (who
-  GitHub explicitly lets close/reopen PRs) indistinguishable from an
-  ordinary read-only one. `role_name` preserves the real role
-  (`admin`/`maintain`/`write`/`triage`/a custom role). This was wrong in
-  the first version of this file and caught on review — do not revert it
-  by "simplifying" back to `permission`.
+- **`getCollaboratorPermissionLevel` needs BOTH `permission` and
+  `role_name` — neither field alone is correct.** `permission` is the
+  legacy 4-value field (`admin`/`write`/`read`/`none`); GitHub collapses a
+  CUSTOM repository role into the base level it was derived from here, so
+  it is the field that generalizes correctly across org-defined
+  write/admin-based custom roles. `role_name` is the actual current role
+  name, needed ONLY to catch Triage, which `permission` collapses into
+  `read` (indistinguishable from an ordinary read-only collaborator, even
+  though GitHub explicitly lets Triage close/reopen PRs). The correct
+  check is `["admin","write"].includes(permission) || role_name ===
+  "triage"`. This file went through both wrong states already:
+  `permission`-only (missed Triage) then `role_name`-only (missed custom
+  roles, caught by this repo's own selftest on round 2 of PR #28) — do
+  not "simplify" back to either single field.
 
 ## Editing gotchas
 
