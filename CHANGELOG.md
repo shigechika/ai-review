@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.1](https://github.com/shigechika/ai-review/compare/v1.2.0...v1.2.1) (2026-08-08)
+
+
+### Bug Fixes
+
+* sweep orphan sticky comments on skip paths too, not only full reviews ([#26](https://github.com/shigechika/ai-review/issues/26)) ([d61271b](https://github.com/shigechika/ai-review/commit/d61271ba5d4b562704bce4c15138f5786fe116de))
+
 ## [1.2.0](https://github.com/shigechika/ai-review/compare/v1.1.3...v1.2.0) (2026-08-07)
 
 
