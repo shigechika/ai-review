@@ -109,6 +109,7 @@ Dependabot PRs are skipped by the engine itself.
      pull_request_target:
        types: [opened, reopened, closed]
    permissions:
+     contents: read
      pull-requests: write
      issues: write
    concurrency:
