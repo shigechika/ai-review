@@ -45,7 +45,11 @@ engine:
 6. A **documentation-only PR** switches to docs-mode: documentation
    accuracy becomes the review subject, and source files the docs cite are
    attached (at the PR head) as evidence, so claims about signatures,
-   defaults or behavior are checked against the code.
+   defaults or behavior are checked against the code. If the PR touches
+   README.md or README.ja.md, the untouched sibling (if any) is attached
+   too, so a claim present in one language but missing or contradicted in
+   the other gets flagged — phrasing and translation style are explicitly
+   out of scope, only what is claimed.
 
 The review is **advisory only**: every failure path soft-fails, so this job
 can never block a PR.
