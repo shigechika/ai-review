@@ -650,6 +650,23 @@ jobs:
             mv attach_list.txt attach_docs.txt
             grep -oE '\.?[A-Za-z0-9_][A-Za-z0-9_./-]*\.(py|pyi|ts|tsx|js|mjs|go|rs|rb|java|kt|kts|c|h|cc|cpp|hpp|cs|php|swift|scala|sql|lua|sh|bash|yml|yaml|toml|cfg|json)' fulldiff.txt \
               | sed 's#^\./##' | sort -u > tokens_raw.txt || true
+            # README bilingual pair: if this PR's changed docs include
+            # exactly one of the ROOT-level README.md / README.ja.md
+            # (whole-line match against attach_docs.txt, so a nested
+            # docs/README.md does not trigger this), the untouched sibling
+            # is not visible anywhere else in the prompt — attach it as
+            # evidence too, so a claim mismatch between the two languages
+            # is actually checkable (see the docs-mode focus paragraph
+            # below). Treated as a citation, not a changed file, so it
+            # goes through the same prioritized, capped, deduplicated
+            # list as everything else in tokens_raw.txt, and a repo with
+            # no README.ja.md just 404s in the fetch loop for free.
+            if grep -qxF 'README.md' attach_docs.txt && ! grep -qxF 'README.ja.md' attach_docs.txt; then
+              echo 'README.ja.md' >> tokens_raw.txt
+            fi
+            if grep -qxF 'README.ja.md' attach_docs.txt && ! grep -qxF 'README.md' attach_docs.txt; then
+              echo 'README.md' >> tokens_raw.txt
+            fi
             # Docs cite paths relative to THEIR OWN directory as often as to
             # the repo root: `./client.py` inside docs/guide.md usually
             # means docs/client.py, which a root-anchored fetch would 404
@@ -853,8 +870,16 @@ jobs:
           defaults; behavior the code does not implement), commands or
           examples that would fail if a reader ran them, contradictions
           within the documentation itself, and security-relevant
-          misdirection. Treat a failing command or security misdirection
-          as blocking; other inaccuracies as advisory.
+          misdirection. When both README.md and README.ja.md are present
+          in this prompt (as diff or as attached evidence), also check
+          whether the two make the same claims: report a concrete claim
+          stated in one language that is missing or contradicted in the
+          other. Report only a difference in what is claimed, never a
+          difference in phrasing, tone, or translation style between the
+          two languages — those are not a review subject. Treat a failing
+          command or security misdirection as blocking; other
+          inaccuracies, including a cross-language claim mismatch, as
+          advisory.
 
           The prompt may include source files cited by the documentation,
           attached as evidence. Judge documented claims against them; do

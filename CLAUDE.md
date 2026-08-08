@@ -121,6 +121,17 @@ set — see "pr-gate.yml invariants" below.
 - User-facing strings that other code greps for (`No findings clear the
   reporting bar`, `severity:` lines, `===FINDING`/`===LEDGER===` markers)
   are load-bearing; the `language` input must never localize them.
+- The "Do NOT report: style, tone or wording preferences" line in
+  docs-mode is a deliberate scope boundary, not an oversight — this
+  engine is a narrow, high-precision lens (concrete claim vs. evidence),
+  not a generic style linter, and that is intentional. The
+  README.md/README.ja.md claim-parity check (same docs-mode focus
+  paragraph) does not violate this: it reports a claim present in one
+  language and missing or contradicted in the other, never a difference
+  in phrasing or translation style. Do not widen either check into
+  general prose-quality review without discussing the tradeoff first —
+  it was evaluated once already (README.ja.md rewrite, 2026-08-08) and
+  deliberately kept out of the automated reviewer.
 
 ## Verifying changes
 
