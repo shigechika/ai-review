@@ -85,6 +85,15 @@ set — see "pr-gate.yml invariants" below.
   page, not assumption) that the caller repo has enabled a non-default
   "send secrets to fork PR workflows" policy, since that is the only
   situation where the coupling would actually save anything.
+- **Use `role_name`, not `permission`, from `getCollaboratorPermissionLevel`.**
+  The legacy `permission` field only ever returns
+  `admin`/`write`/`read`/`none` — it collapses Maintain into `write` and
+  Triage into `read`, which would make a Triage-role collaborator (who
+  GitHub explicitly lets close/reopen PRs) indistinguishable from an
+  ordinary read-only one. `role_name` preserves the real role
+  (`admin`/`maintain`/`write`/`triage`/a custom role). This was wrong in
+  the first version of this file and caught on review — do not revert it
+  by "simplifying" back to `permission`.
 
 ## Editing gotchas
 

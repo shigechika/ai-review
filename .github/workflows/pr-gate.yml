@@ -66,10 +66,12 @@ jobs:
             const GATE_MARKER = "<!-- ai-review-pr-gate -->";
 
             // First-party automation for this repository — never
-            // auto-closed. ai-review.yml already skips dependabot[bot]
-            // via its own job condition; this list exists so the GATE
-            // does not close what the review step was always going to
-            // skip anyway.
+            // auto-closed, regardless of what ai-review.yml itself does
+            // or does not skip (it only excludes dependabot[bot] via its
+            // own job condition, not github-actions[bot] — do not assume
+            // parity between the two lists). release-please and similar
+            // repo-owned automation open PRs as github-actions[bot]; those
+            // must stay open too.
             const TRUSTED_BOTS = new Set(["dependabot[bot]", "github-actions[bot]"]);
 
             // GitHub-computed, cannot be spoofed by the PR author and
@@ -84,18 +86,13 @@ jobs:
             const association = pr.author_association;
             const pullNumber = pr.number;
 
-            async function currentLabels() {
-              const labels = await github.paginate(github.rest.issues.listLabelsOnIssue, {
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: pullNumber,
-                per_page: 100,
-              });
-              return new Set(labels.map((label) => label.name));
-            }
-
+            // No precheck of current labels here: addLabels is idempotent
+            // (re-adding a label already present is a harmless no-op, not
+            // an error), and removeLabel below already tolerates a 404
+            // (label already absent) the same way. A precheck-then-act
+            // would only add a paginated fetch and a race window between
+            // the read and the write, for no correctness benefit.
             async function addReviewLabel() {
-              if ((await currentLabels()).has(REVIEW_LABEL)) return;
               await github.rest.issues.addLabels({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
@@ -105,7 +102,6 @@ jobs:
             }
 
             async function removeReviewLabel() {
-              if (!(await currentLabels()).has(REVIEW_LABEL)) return;
               try {
                 await github.rest.issues.removeLabel({
                   owner: context.repo.owner,
@@ -118,6 +114,14 @@ jobs:
               }
             }
 
+            // Edits the existing comment in place — the opposite of
+            // ai-review.yml's own repost-then-delete sticky comment
+            // (deliberately changed to repost, since GitHub never
+            // notifies watchers on an edit). That's safe here only
+            // because the rejection message below is static, so this
+            // rarely does more than the identical-body short-circuit;
+            // if this message is ever made to vary per run, revisit
+            // whether a silent edit is still the right call.
             async function upsertGateComment(message) {
               const comments = await github.paginate(github.rest.issues.listComments, {
                 owner: context.repo.owner,
@@ -126,8 +130,13 @@ jobs:
                 per_page: 100,
               });
               const body = `${GATE_MARKER}\n${message}`;
+              // Matched by THIS workflow's own posting identity
+              // (github-actions[bot], via the default GITHUB_TOKEN), not
+              // any bot — a generic "type === Bot" match could pick up
+              // and silently overwrite a comment from a different bot/app
+              // that happens to contain the marker text.
               const existing = comments.find(
-                (comment) => comment.user?.type === "Bot" && comment.body?.includes(GATE_MARKER)
+                (comment) => comment.user?.login === "github-actions[bot]" && comment.body?.includes(GATE_MARKER)
               );
               if (existing?.body === body) return;
               if (existing) {
@@ -154,8 +163,21 @@ jobs:
                   repo: context.repo.repo,
                   username,
                 });
-                return data.permission;
-              } catch {
+                // role_name (not permission) distinguishes Maintain/Triage
+                // from Write/Read: the legacy permission field collapses
+                // Maintain into "write" and Triage into "read", which
+                // would make Triage collaborators — who GitHub explicitly
+                // lets close/reopen PRs — indistinguishable from ordinary
+                // read-only ones.
+                return data.role_name;
+              } catch (error) {
+                // 404 (not a collaborator) is the expected, silent case.
+                // Anything else (403 token-scope issue, transient 5xx) is
+                // unexpected and would otherwise silently defeat the
+                // reopen override below with no trace in the run log.
+                if (error.status !== 404) {
+                  core.warning(`Could not read collaborator permission for ${username}: ${error.message}`);
+                }
                 return null;
               }
             }
@@ -186,9 +208,9 @@ jobs:
             // by the same untrusted actor re-clicking reopen.
             if (context.payload.action === "reopened") {
               const senderLogin = context.payload.sender?.login;
-              const permission = senderLogin ? await getCollaboratorPermission(senderLogin) : null;
-              if (["admin", "maintain", "write"].includes(permission)) {
-                core.info(`${senderLogin} (permission=${permission}) reopened PR #${pullNumber} — honoring the override`);
+              const role = senderLogin ? await getCollaboratorPermission(senderLogin) : null;
+              if (["admin", "maintain", "write", "triage"].includes(role)) {
+                core.info(`${senderLogin} (role=${role}) reopened PR #${pullNumber} — honoring the override`);
                 await addReviewLabel();
                 return;
               }
