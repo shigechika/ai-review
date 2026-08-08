@@ -29,10 +29,12 @@ engine:
    (see below for the pushes that don't) posts a fresh comment at the
    bottom of the PR and removes the earlier one(s). Every round, including
    a skipped one, also sweeps away any orphaned marker comment left by a
-   prior round's failed or racing delete — so a stale duplicate is never
-   left waiting for the next full review to clean it up, and the current
-   review state is always the most recent (and only) `ai-review` comment in
-   the thread — though not necessarily the very last comment overall, since
+   prior round's failed or racing delete — so a stale duplicate never
+   waits past the next round to be cleaned up (a delete failure only
+   warns and leaves the run block running, so a duplicate can briefly
+   exist between rounds), and the current review state is always the
+   most recent `ai-review` comment in the thread — though not
+   necessarily the very last comment overall, since
    a skipped push posts nothing itself and human comments made afterward
    can land below it. Because every non-skipped round posts a brand-new
    comment rather than editing one in place, PR subscribers get a
@@ -194,9 +196,12 @@ the short version:
 - **`pull_request`, never `pull_request_target`** — the job must not run
   with secrets against an attacker-controlled head. Consequence: fork PRs
   have no secrets and get no review. Accepted.
-- **No checkout.** Everything arrives over the GitHub API; nothing from the
-  PR is ever a file on the runner's disk (which also kills the
-  symlink-to-`/proc/self/environ` class of attack).
+- **No checkout of PR content.** The diff and changed-file contents are
+  fetched over the GitHub API and written to plain text files the
+  workflow itself names, purely to assemble the prompt — but the PR's
+  branch is never checked out as a git working tree, so nothing from the
+  PR ever controls a file's path or type on the runner (which is what
+  kills the symlink-to-`/proc/self/environ` class of attack).
 - **Guidance is read at the BASE revision** — the files that *steer* the
   model must not be editable by the PR being reviewed. The changed-file
   attachments are read at HEAD on purpose: they are the review *subject*,
@@ -222,8 +227,10 @@ the short version:
 - `v1` is a **moving tag**: callers pinned to `@v1` get engine fixes
   automatically (the release workflow moves it on every release).
   Breaking interface changes bump the major.
-- Immutable `vX.Y.Z` tags exist for pinning and for rollback
-  (`git tag -f v1 <last-good>` rolls back every caller at once).
+- Immutable `vX.Y.Z` tags exist for pinning and for rollback:
+  `git tag -f v1 <last-good> && git push -f origin v1` rolls back every
+  caller at once. Moving the local tag alone does nothing — callers
+  resolve the tag on GitHub, so the force-push is what actually matters.
 - **This repository must stay public** — GitHub can only resolve a
   reusable workflow from a repository the caller can read, so making it
   private would break every caller outside it.
