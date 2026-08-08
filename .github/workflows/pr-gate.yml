@@ -156,46 +156,6 @@ jobs:
               });
             }
 
-            // Needs BOTH fields from getCollaboratorPermissionLevel, not
-            // either alone:
-            //   * permission is the legacy 4-value field
-            //     (admin/write/read/none). GitHub collapses a CUSTOM
-            //     repository role into the base level it was derived
-            //     from here, so this is the field that generalizes
-            //     correctly across custom write/admin-based roles — a
-            //     role named e.g. "Security Engineer" built on write
-            //     still reports permission: "write".
-            //   * role_name is the actual current role name, which is
-            //     the ONLY way to see Triage — permission alone collapses
-            //     Triage into "read", indistinguishable from an ordinary
-            //     read-only collaborator, even though GitHub explicitly
-            //     lets Triage-role members close/reopen PRs.
-            // Checking permission for admin/write and role_name for the
-            // triage special case (rather than switching to role_name
-            // alone) is what makes both custom write-based roles and
-            // built-in Triage work — a round-2 selftest finding caught
-            // that an earlier version of this fix, which checked
-            // role_name alone, silently broke custom roles to fix Triage.
-            async function isWriteCapable(username) {
-              try {
-                const { data } = await github.rest.repos.getCollaboratorPermissionLevel({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  username,
-                });
-                return ["admin", "write"].includes(data.permission) || data.role_name === "triage";
-              } catch (error) {
-                // 404 (not a collaborator) is the expected, silent case.
-                // Anything else (403 token-scope issue, transient 5xx) is
-                // unexpected and would otherwise silently defeat the
-                // reopen override below with no trace in the run log.
-                if (error.status !== 404) {
-                  core.warning(`Could not read collaborator permission for ${username}: ${error.message}`);
-                }
-                return false;
-              }
-            }
-
             // closed: keep label state honest, nothing else to decide.
             // (Note: this branch never fires for a close performed by
             // THIS workflow's own GITHUB_TOKEN — GitHub does not re-fire
@@ -212,18 +172,25 @@ jobs:
               return;
             }
 
-            // A closed PR can only be reopened by its author or a
-            // collaborator — GitHub enforces this UI-side. If the actor
-            // who just reopened it holds write access, honor their
-            // explicit override even though the PR's own author never
-            // clears the association bar below. Falls through to the
-            // normal check when the author reopened their own rejected
-            // PR, so enforcement stays consistent instead of being undone
-            // by the same untrusted actor re-clicking reopen.
+            // A closed PR can only be reopened by its author or someone
+            // GitHub itself has authorized to do so (write, Triage, any
+            // custom role derived from either, or whatever access model
+            // GitHub adds next) — that check already happened, by GitHub,
+            // before this event could fire at all. So rather than
+            // re-deriving the same authorization decision from
+            // permission/role_name heuristics (three rounds of this
+            // repo's own selftest each found a different custom-role
+            // shape those fields miss — see CLAUDE.md), trust the fact
+            // that reopening SUCCEEDED: if whoever did it is not the
+            // PR's own author, GitHub already vetted them. Falls through
+            // to the normal check when the author reopened their own
+            // rejected PR (GitHub always allows that, trusted or not),
+            // so enforcement stays consistent instead of being undone by
+            // the same untrusted actor re-clicking reopen.
             if (context.payload.action === "reopened") {
               const senderLogin = context.payload.sender?.login;
-              if (senderLogin && (await isWriteCapable(senderLogin))) {
-                core.info(`${senderLogin} reopened PR #${pullNumber} — honoring the override`);
+              if (senderLogin && senderLogin !== author) {
+                core.info(`${senderLogin} reopened PR #${pullNumber} (not the PR author) — honoring the override`);
                 await addReviewLabel();
                 return;
               }

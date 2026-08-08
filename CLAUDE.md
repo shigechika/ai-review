@@ -85,20 +85,23 @@ set — see "pr-gate.yml invariants" below.
   page, not assumption) that the caller repo has enabled a non-default
   "send secrets to fork PR workflows" policy, since that is the only
   situation where the coupling would actually save anything.
-- **`getCollaboratorPermissionLevel` needs BOTH `permission` and
-  `role_name` — neither field alone is correct.** `permission` is the
-  legacy 4-value field (`admin`/`write`/`read`/`none`); GitHub collapses a
-  CUSTOM repository role into the base level it was derived from here, so
-  it is the field that generalizes correctly across org-defined
-  write/admin-based custom roles. `role_name` is the actual current role
-  name, needed ONLY to catch Triage, which `permission` collapses into
-  `read` (indistinguishable from an ordinary read-only collaborator, even
-  though GitHub explicitly lets Triage close/reopen PRs). The correct
-  check is `["admin","write"].includes(permission) || role_name ===
-  "triage"`. This file went through both wrong states already:
-  `permission`-only (missed Triage) then `role_name`-only (missed custom
-  roles, caught by this repo's own selftest on round 2 of PR #28) — do
-  not "simplify" back to either single field.
+- **Do not re-derive GitHub's reopen ACL from `getCollaboratorPermissionLevel`
+  at all — trust that the event fired.** PR #28's reopen-override logic
+  went through three rounds of this repo's own selftest, each finding a
+  different shape of collaborator (built-in Triage, a custom role built on
+  write, a custom role built on Triage) that a `permission`/`role_name`
+  heuristic missed — because GitHub's permission model has more shapes
+  than any fixed field combination reliably captures, and a custom role
+  can be built on any base. The fix that actually holds: a closed PR can
+  only be reopened by its author or by someone GitHub has already
+  authorized to do so — that authorization check happens before the
+  `reopened` event can fire at all. So the override condition is simply
+  `sender.login !== author` (the PR's own author reopening themselves is
+  the one case that means nothing, since GitHub always allows that
+  regardless of trust). No permission-level API call needed. If a future
+  edit reintroduces a `getCollaboratorPermissionLevel`-based heuristic
+  here, that is very likely a regression back to round 1 or round 2 of
+  this exact bug, not an improvement.
 
 ## Editing gotchas
 
