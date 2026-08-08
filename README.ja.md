@@ -117,11 +117,15 @@ Dependabot の PR はエンジン側でスキップされます。
 
    信頼判定はGitHub組み込みの `author_association`
    （`OWNER`/`MEMBER`/`COLLABORATOR`）という単一のライブな指標のみを使い、
-   `dependabot[bot]`/`github-actions[bot]` は組み込みの許可リストで
-   常に除外され、通常のメンテナンスPRがクローズされることはありません。
-   却下された作成者自身によるreopenは同じ判定が再実行され再度クローズ
-   されますが、maintainer（またはTriageロールのcollaborator）による
-   reopenは尊重されます。リポジトリ変数 `AI_REVIEW_DISABLE_GATE` を
+   `dependabot[bot]`/`github-actions[bot]`、および同一リポジトリの
+   `release-please--*` ブランチは組み込みの許可リストで常に除外されます
+   — 依存関係更新やリリースPRがクローズされることはなく、
+   `ai-review.yml`自身のスキップロジックにより実際には決してレビュー
+   されないPRに紛らわしいラベルが付くこともありません。却下された
+   作成者自身によるreopenは同じ判定が再実行され再度クローズされますが、
+   それ以外の誰かによるreopenは尊重されます — GitHub自身がそもそも
+   十分な権限を持つ人物にしかこの操作を許可しないため、権限の照会は
+   不要です。リポジトリ変数 `AI_REVIEW_DISABLE_GATE` を
    `true` にすると、callerファイルを残したままこのworkflowを
    無効化できます。
 
