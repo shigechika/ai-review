@@ -23,9 +23,13 @@ name: AI review
 #     instead of scrolling back to wherever round 1 happened to land (a
 #     skipped push posts nothing, so that comment is not always the very
 #     last one in the thread). A delete failure leaves
-#     an orphan, but it is not permanent: the next successful round
-#     re-scans for every marker comment still on the PR and deletes it,
-#     not just its immediate predecessor. Posting a fresh comment on every
+#     an orphan, but it is not permanent: every round re-scans for every
+#     marker comment still on the PR and sweeps up anything but the
+#     current one — including a round that skips posting entirely, not
+#     only the next round that runs a full review. Without that, an
+#     orphan from a failed delete would sit on the PR through merge
+#     whenever every remaining push before merge is docs-only or
+#     already-reviewed (found by /code-review on merged #24). Posting a fresh comment on every
 #     non-skipped push also means every push now notifies PR subscribers,
 #     unlike the previous edit-in-place behavior, which was silent. A
 #     machine-readable findings ledger rides inside it, base64-
@@ -308,6 +312,27 @@ jobs:
                 | jq -c 'select((.findings | type) == "array")' 2>/dev/null || true)
             fi
           fi
+          # Deletes every id in OLD_COMMENT_IDS except $1 (pass "" to delete
+          # all of them). Called BOTH on the skip paths below (327/346/386
+          # at the time of writing) AND at the very end of a full review
+          # round -- not only the latter. Without this, an orphan left by a
+          # prior round's failed/racing delete only got swept up once a
+          # non-skipped round eventually ran; if every remaining push before
+          # merge is docs-only, already-reviewed, or otherwise skipped, that
+          # orphan sat on the PR through merge, which is exactly the "scroll
+          # back to find the current state" confusion post-then-delete
+          # exists to eliminate (found by /code-review on merged #24). Calling this on every
+          # round, skipped or not, is what makes self-healing actually
+          # unconditional rather than contingent on a full review happening.
+          _gc_stale_stickies() {
+            keep_id="$1"
+            printf '%s\n' "$OLD_COMMENT_IDS" | while IFS= read -r old_id; do
+              [ -n "$old_id" ] || continue
+              [ "$old_id" = "$keep_id" ] && continue
+              gh api --method DELETE "repos/$GH_REPO/issues/comments/$old_id" >/dev/null 2>&1 \
+                || echo "::warning::failed to delete stale AI review comment $old_id"
+            done
+          }
           OLD_FINDINGS=$(printf '%s' "$ledger_json" | jq -c '.findings // []' 2>/dev/null || true)
           if [ -z "$OLD_FINDINGS" ]; then OLD_FINDINGS='[]'; fi
           prev_rounds=$(printf '%s' "$ledger_json" | jq -r '.rounds // 0' 2>/dev/null || true)
@@ -324,6 +349,7 @@ jobs:
           if [ -n "$LAST_SHA" ]; then
             if [ "$LAST_SHA" = "$HEAD_SHA" ]; then
               echo "::notice::head $HEAD_SHA already reviewed in round $prev_rounds — nothing new, skipping"
+              _gc_stale_stickies "$COMMENT_ID"
               exit 0
             fi
             compare=$(gh api "repos/$GH_REPO/compare/$LAST_SHA...$HEAD_SHA" 2>/dev/null || true)
@@ -343,6 +369,7 @@ jobs:
               cstatus=$(printf '%s' "$compare" | jq -r '.status // ""' 2>/dev/null || true)
               if [ "$nfiles" -eq 0 ] && [ "$cstatus" = "identical" ]; then
                 echo "::notice::no file changes since last reviewed commit $LAST_SHA — skipping this round"
+                _gc_stale_stickies "$COMMENT_ID"
                 exit 0
               fi
               # Everything below — the docs-only skip AND delta mode —
@@ -383,6 +410,7 @@ jobs:
                 # re-reviewed — findings could never be verified fixed.
                 if [ "$docs_only" = "true" ] && [ "$nfiles" -lt 300 ] && [ "$DOCS_MODE" != "1" ]; then
                   echo "::notice::docs-only delta since $LAST_SHA (all *.md) — skipping this review round"
+                  _gc_stale_stickies "$COMMENT_ID"
                   exit 0
                 fi
                 # Delta mode only when the delta is COMPLETE: the compare
@@ -1512,18 +1540,17 @@ jobs:
 
           # Post fresh, then delete every old marker comment found above
           # (never the reverse): if the post fails, the PR keeps its
-          # previous review comment(s) instead of ending up with none. A
-          # delete failure (e.g. the old comment was already removed by a
-          # human) is a soft warning, not a job failure — an orphan left
-          # behind here is swept up by this same GC on the next successful
-          # round, since OLD_COMMENT_IDS is re-collected from scratch every
-          # time and is not limited to the single most recent survivor.
+          # previous review comment(s) instead of ending up with none. The
+          # just-posted comment's id is not in OLD_COMMENT_IDS (it did not
+          # exist when that list was collected), so _gc_stale_stickies ""
+          # deletes all of them, same as always. A delete failure (e.g. the
+          # old comment was already removed by a human) is a soft warning,
+          # not a job failure — an orphan left behind here is swept up on
+          # the very next round REGARDLESS of whether that round skips
+          # (see _gc_stale_stickies's other call sites above), not only on
+          # the next round that reaches this point.
           if post_err=$(gh pr comment "$PR" --body-file comment.md 2>&1 >/dev/null); then
-            printf '%s\n' "$OLD_COMMENT_IDS" | while IFS= read -r old_id; do
-              [ -n "$old_id" ] || continue
-              gh api --method DELETE "repos/$GH_REPO/issues/comments/$old_id" >/dev/null 2>&1 \
-                || echo "::warning::failed to delete previous AI review comment $old_id"
-            done
+            _gc_stale_stickies ""
           else
             echo "::warning::failed to post AI review comment: $(printf '%s' "$post_err" | tr '\n' ' ' | cut -c1-300)"
           fi

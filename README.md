@@ -27,13 +27,16 @@ engine:
    carries per-finding status (`open`/`fixed`/`dismissed`) across rounds —
    settled points are never re-argued. Every round that actually reviews
    (see below for the pushes that don't) posts a fresh comment at the
-   bottom of the PR and removes the earlier one(s), so the current review
-   state is always the most recent `ai-review` comment in the thread —
-   though not necessarily the very last comment overall, since a skipped
-   push posts nothing and human comments made afterward can land below it.
-   Because every non-skipped round posts a brand-new comment rather than
-   editing one in place, PR subscribers get a notification on every such
-   round, not just the first.
+   bottom of the PR and removes the earlier one(s). Every round, including
+   a skipped one, also sweeps away any orphaned marker comment left by a
+   prior round's failed or racing delete — so a stale duplicate is never
+   left waiting for the next full review to clean it up, and the current
+   review state is always the most recent (and only) `ai-review` comment in
+   the thread — though not necessarily the very last comment overall, since
+   a skipped push posts nothing itself and human comments made afterward
+   can land below it. Because every non-skipped round posts a brand-new
+   comment rather than editing one in place, PR subscribers get a
+   notification on every such round, not just the first.
 5. On later pushes, reviews only the **new commits** (delta rounds via the
    compare API), and **skips posting entirely** for docs-only pushes to
    code PRs or a head already reviewed, degrading safely to a full-diff

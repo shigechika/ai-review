@@ -211,4 +211,45 @@ t "sticky-gc: three old comments preserve every id" \
 t "engine: sticky_all is read with a trailing newline (no dropped last line)" "yes" \
   "$(grep -qF "OLD_COMMENT_IDS=\$(printf '%s\\n' \"\$sticky_all\" | while IFS= read -r b64; do" "$ENGINE" && echo yes || echo no)"
 
+# Mirrors _gc_stale_stickies's keep-id filter (see the engine's "Sticky
+# comment + findings ledger" section): every id in OLD_COMMENT_IDS is a
+# delete target EXCEPT the one matching keep_id. Found by /code-review on
+# merged #24: this function has to run on skip paths too, not only the
+# full-review post-then-delete
+# step, so an orphan left by a prior round's failed/racing delete gets
+# swept up on the very next round regardless of whether that round posts
+# anything new.
+targets_for_delete() {
+  local old_ids=$1 keep_id=$2
+  printf '%s\n' "$old_ids" | while IFS= read -r old_id; do
+    [ -n "$old_id" ] || continue
+    [ "$old_id" = "$keep_id" ] && continue
+    printf '%s\n' "$old_id"
+  done
+}
+
+t "gc-filter: single orphan, keep empty (full-review path) -> deleted" \
+  "111" "$(targets_for_delete "111" "" | tr -d '\n')"
+t "gc-filter: single orphan matching keep_id (skip path, no orphan) -> nothing deleted" \
+  "" "$(targets_for_delete "111" "111" | tr -d '\n')"
+t "gc-filter: two orphans plus the current comment -> only the orphans are targeted" \
+  "111 222" "$(targets_for_delete "$(printf '111\n222\n333')" "333" | tr '\n' ' ' | sed 's/ $//')"
+t "gc-filter: empty OLD_COMMENT_IDS -> nothing to delete" \
+  "" "$(targets_for_delete "" "333" | tr -d '\n')"
+
+# Structural check: every skip-path `exit 0` (already-reviewed, no-file-
+# -changes, docs-only-delta) in the real engine must call
+# _gc_stale_stickies immediately before exiting — /code-review on merged
+# #24 found that these paths bypassed cleanup entirely, so a fix that adds
+# the call in one spot but not the others silently regresses the other two.
+skip_exit_count=$(grep -c '^ *exit 0$' "$ENGINE")
+gc_before_skip_exit=$(awk '
+  /_gc_stale_stickies/ { pending = 1; next }
+  /^ *exit 0$/ { if (pending) { n++ }; pending = 0 }
+  { pending = 0 }
+  END { print n + 0 }
+' "$ENGINE")
+t "engine: _gc_stale_stickies precedes at least 3 exit-0 skip points" "yes" \
+  "$([ "$gc_before_skip_exit" -ge 3 ] 2>/dev/null && echo yes || echo "no ($gc_before_skip_exit of $skip_exit_count exit-0 sites)")"
+
 t_summary
