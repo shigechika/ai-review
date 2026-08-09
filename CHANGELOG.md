@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.2](https://github.com/shigechika/ai-review/compare/v1.4.1...v1.4.2) (2026-08-09)
+
+
+### Bug Fixes
+
+* detect README rename via previous_filename, not just current path ([#42](https://github.com/shigechika/ai-review/issues/42)) ([fb651f8](https://github.com/shigechika/ai-review/commit/fb651f87bd81eab5de8ea247f53f6db41d725544))
+
 ## [1.4.1](https://github.com/shigechika/ai-review/compare/v1.4.0...v1.4.1) (2026-08-09)
 
 
