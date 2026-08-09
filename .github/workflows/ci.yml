@@ -51,5 +51,17 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
+      - name: Install PyYAML
+        # tests/test_extraction.sh's PyYAML cross-check tolerates a
+        # missing import (skips rather than fails) since it is only a
+        # cross-check on top of a dependency-free primary extractor.
+        # tests/test_lint_embedded_shell.py has no such fallback: it
+        # exec_module()s scripts/lint-embedded-shell.py directly, which
+        # imports yaml unconditionally at module scope, so a missing
+        # PyYAML here would hard-fail that whole file rather than skip.
+        # Install it explicitly instead of relying on it being present on
+        # the runner image, matching the actionlint job's own explicit
+        # install for the same script.
+        run: pip install --quiet --retries 3 --timeout 60 "pyyaml==6.0.3"
       - name: Run the engine's extraction + logic test suite
         run: bash tests/run_all.sh

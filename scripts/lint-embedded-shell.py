@@ -75,34 +75,134 @@ def effective_default_shell(workflow_defaults: dict | None, job_defaults: dict |
     return None
 
 
-def step_is_bash(step: dict, default_shell: str | None) -> bool:
+def runs_on_is_windows(runs_on) -> bool:
+    # runs-on can be a bare string, a list, or an unresolvable
+    # ${{ ... }} expression (matrix-driven OS). Only a literal windows-*
+    # STRING is treated as Windows; anything we cannot prove is Windows
+    # keeps today's behavior (assume bash) -- a matrix job that resolves
+    # to windows at runtime but is not literally spelled out here is a
+    # false negative, not a regression, since this script never checked
+    # runs-on at all before this fix.
+    #
+    # A LIST containing "self-hosted" needs a narrower rule than the
+    # windows-* PREFIX match used for GitHub-hosted labels. GitHub
+    # auto-assigns an EXACT "Windows"/"Linux"/"macOS" OS label (plus an
+    # architecture label like "X64"/"ARM64") to every self-hosted runner
+    # at registration time, alongside "self-hosted" and any custom labels
+    # its admin adds -- e.g. [self-hosted, Windows, X64] is GitHub's own
+    # standard shape (this is what ai-review's R2F1 on PR #44 flagged
+    # this function as wrongly treating as Bash). That auto-assigned
+    # EXACT "windows" label is trustworthy. A mere PREFIX match is not: a
+    # Linux self-hosted box can validly carry a custom label like
+    # "windows-sdk" ("builds the Windows SDK", not "runs Windows" -- this
+    # is what R1F1 on the same PR flagged the previous prefix-based
+    # version as wrongly treating as Windows). So for a self-hosted list,
+    # only an exact "windows" entry counts; a prefix match does not.
+    if isinstance(runs_on, str):
+        # Known, accepted gap (not fixed, unlike the list branch above): a
+        # BARE STRING custom label -- runs-on: windows-sdk, with no list
+        # and no literal "self-hosted" token anywhere for this branch to
+        # key off of -- is exactly R1F1's failure mode again, and this
+        # branch still can't tell that shape apart from a GitHub-hosted
+        # windows-latest/windows-2022 label; both are just a string. Left
+        # as a prefix match on the judgment that GitHub's own documented
+        # self-hosted examples all use the list form (["self-hosted",
+        # ...]), so a bare custom label colliding with the windows-*
+        # prefix is a narrower, unconfirmed case rather than one seen in
+        # practice -- same bar issue #23's other two cases were held to
+        # before being picked up. Revisit if a real workflow hits it.
+        return runs_on.strip().lower().startswith("windows")
+    if isinstance(runs_on, list):
+        labels = [x.strip().lower() for x in runs_on if isinstance(x, str)]
+        if "self-hosted" in labels:
+            return "windows" in labels
+        return any(label.startswith("windows") for label in labels)
+    return False
+
+
+def step_shell_dialect(step: dict, default_shell: str | None, runs_on_windows: bool) -> str | None:
+    """Returns the shellcheck --shell dialect to use ("bash" or "sh"), or
+    None if the step's script is not a POSIX shell shellcheck understands
+    (pwsh, python, a Windows default, etc.) and must be skipped."""
     shell = step.get("shell") or default_shell
     if shell is None:
-        return True
+        # No shell: key anywhere in scope (step/job/workflow defaults).
+        # GitHub Actions' own implicit default depends on the runner OS:
+        # pwsh on a Windows runner, bash everywhere else (Linux/macOS).
+        return None if runs_on_windows else "bash"
+    if not shell.strip():
+        return None
     # GitHub Actions allows a custom shell command string (e.g.
     # "bash -e {0}", "bash --noprofile --norc -eo pipefail {0}") in place
-    # of a bare "bash" -- still bash underneath, just with extra flags, and
-    # still worth shellchecking. Only the leading command word matters.
-    return shell.split()[0] == "bash" if shell.strip() else False
+    # of a bare "bash"/"sh" -- still the same dialect underneath, just with
+    # extra flags, and still worth shellchecking. Only the leading command
+    # word matters.
+    word = shell.split()[0]
+    if word == "bash":
+        return "bash"
+    if word == "sh":
+        return "sh"
+    return None
 
 
 _BASH_IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
-# GitHub Actions substitutes ${{ ... }} expressions into the script text
-# BEFORE bash ever sees it -- it isn't bash syntax at all (it commonly
-# appears inside a quoted string like "${{ github.ref }}", which shellcheck
-# reads as an invalid parameter expansion starting with `{` and rejects
-# with SC2296, failing a step that is valid GitHub Actions workflow syntax
-# and would run correctly in practice). actionlint's own shellcheck
-# integration masks these before handing the script to shellcheck; do the
-# same with a bash-safe placeholder. Contents of the expression don't
-# matter here -- actionlint's own -shellcheck= run in ci.yml (not this
-# script) is what validates expression syntax itself.
-_GHA_EXPRESSION = re.compile(r"\$\{\{.*?\}\}", re.DOTALL)
-
 
 def mask_gha_expressions(script: str) -> str:
-    return _GHA_EXPRESSION.sub("GHA_EXPR", script)
+    # GitHub Actions substitutes ${{ ... }} expressions into the script text
+    # BEFORE bash ever sees it -- it isn't bash syntax at all (it commonly
+    # appears inside a quoted string like "${{ github.ref }}", which
+    # shellcheck reads as an invalid parameter expansion starting with `{`
+    # and rejects with SC2296, failing a step that is valid GitHub Actions
+    # workflow syntax and would run correctly in practice). actionlint's
+    # own shellcheck integration masks these before handing the script to
+    # shellcheck; do the same with a bash-safe placeholder. Contents of the
+    # expression don't matter here -- actionlint's own -shellcheck= run in
+    # ci.yml (not this script) is what validates expression syntax itself.
+    #
+    # A plain regex can't find the real closing }} correctly: GHA
+    # expression syntax allows a '...' string literal inside the
+    # expression, and a literal }} can appear as DATA inside that string
+    # (e.g. ${{ format('}}{0}', 'x') }}, or a doubled '' escaped quote
+    # inside one). A non-greedy \}\}.*?\}\} regex stops at the first }} it
+    # sees, which can be the one inside the string, leaving a corrupted,
+    # unmasked fragment of GHA syntax behind for shellcheck to choke on as
+    # invalid bash. Scan quote-aware instead: track whether each character
+    # is inside a '...' literal (toggling on every quote character --
+    # doubled '' quotes cancel out to the same state, which is exactly
+    # right, since GHA's own escape convention for a literal quote inside a
+    # string is to double it) and only treat }} as the terminator when not
+    # inside one.
+    out = []
+    i = 0
+    n = len(script)
+    while i < n:
+        start = script.find("${{", i)
+        if start == -1:
+            out.append(script[i:])
+            break
+        out.append(script[i:start])
+        j = start + 3
+        in_quote = False
+        end = None
+        while j < n:
+            ch = script[j]
+            if ch == "'":
+                in_quote = not in_quote
+                j += 1
+                continue
+            if not in_quote and script.startswith("}}", j):
+                end = j + 2
+                break
+            j += 1
+        if end is None:
+            # Unterminated expression (malformed workflow) -- bail out and
+            # keep the rest of the script untouched rather than eating it.
+            out.append(script[start:])
+            break
+        out.append("GHA_EXPR")
+        i = end
+    return "".join(out)
 
 
 def env_keys(*envs: dict | None) -> set[str]:
@@ -136,10 +236,12 @@ def main() -> int:
             job_env = job.get("env")
             job_defaults = job.get("defaults")
             default_shell = effective_default_shell(workflow_defaults, job_defaults)
+            runs_on_windows = runs_on_is_windows(job.get("runs-on"))
             steps = job.get("steps") or []
             for i, step in enumerate(steps):
                 run = step.get("run")
-                if not run or not step_is_bash(step, default_shell):
+                dialect = step_shell_dialect(step, default_shell, runs_on_windows) if run else None
+                if not run or dialect is None:
                     continue
                 step_label = step.get("name", f"step {i}")
                 # GitHub Actions injects env:-block keys as real environment
@@ -167,7 +269,7 @@ def main() -> int:
                     script_path = tf.name
                 try:
                     result = subprocess.run(
-                        ["shellcheck", "--shell=bash", script_path],
+                        ["shellcheck", f"--shell={dialect}", script_path],
                         capture_output=True,
                         text=True,
                         timeout=60,
