@@ -87,17 +87,20 @@ t "dash-filename: dirname does not abort" "." "$d"
 
 # ---------- README bilingual pair injection ----------
 # Mirrors the engine's tokens_raw.txt injection: if the docs-mode PR's
-# changed files include exactly one of README.md / README.ja.md, the
-# untouched sibling must be added as a citation so a cross-language claim
-# mismatch is checkable — see the docs-mode focus paragraph.
-inject_readme_sibling() { # attach_docs_content
-  local attach_docs="/tmp/attach_docs_readme.txt" tokens="/tmp/tokens_raw_readme.txt"
-  printf '%s\n' "$1" > "$attach_docs"
+# $prfiles (files-API listing, filename + previous_filename per entry —
+# see the DOCS_MODE detection above) includes exactly one of README.md /
+# README.ja.md, the untouched sibling must be added as a citation so a
+# cross-language claim mismatch is checkable — see the docs-mode focus
+# paragraph. Matched against $prfiles rather than attach_docs.txt
+# specifically so a PR that RENAMES root README.md still matches via
+# previous_filename (R35F1 fix) — see the rename case below.
+inject_readme_sibling() { # prfiles_content
+  local prfiles="$1" tokens="/tmp/tokens_raw_readme.txt"
   : > "$tokens"
-  if grep -qxF 'README.md' "$attach_docs" && ! grep -qxF 'README.ja.md' "$attach_docs"; then
+  if printf '%s\n' "$prfiles" | grep -qxF 'README.md' && ! printf '%s\n' "$prfiles" | grep -qxF 'README.ja.md'; then
     echo 'README.ja.md' >> "$tokens"
   fi
-  if grep -qxF 'README.ja.md' "$attach_docs" && ! grep -qxF 'README.md' "$attach_docs"; then
+  if printf '%s\n' "$prfiles" | grep -qxF 'README.ja.md' && ! printf '%s\n' "$prfiles" | grep -qxF 'README.md'; then
     echo 'README.md' >> "$tokens"
   fi
   cat "$tokens"
@@ -110,15 +113,26 @@ t "readme-sibling: both changed -> no injection" \
   "" "$(inject_readme_sibling $'README.md\nREADME.ja.md')"
 t "readme-sibling: neither changed -> no injection" \
   "" "$(inject_readme_sibling 'docs/guide.md')"
+# R35F1: root README.md renamed to README.en.md. $prfiles carries BOTH
+# the new .filename (README.en.md) and the old .previous_filename
+# (README.md) for a renamed entry, so this must still be recognized as
+# "README.md changed" and inject the untouched README.ja.md sibling —
+# the exact case that silently did nothing when matched against
+# attach_docs.txt (new-name-only) instead.
+t "readme-sibling: README.md renamed to README.en.md -> still injects README.ja.md" \
+  "README.ja.md" "$(inject_readme_sibling $'README.en.md\nREADME.md')"
 
 # Structural check: the engine's real injection must still target
 # tokens_raw.txt (the prioritized, capped, deduplicated evidence list),
 # not attach_docs.txt (which would misrepresent an untouched sibling as
 # part of the diff and deprioritize it as "redundant" — see the engine's
-# own comment on why sources go first).
+# own comment on why sources go first), and must read from $prfiles (which
+# carries previous_filename), not attach_docs.txt (which does not).
 t "engine: README.ja.md injection targets tokens_raw.txt" "yes" \
   "$(grep -qF "echo 'README.ja.md' >> tokens_raw.txt" "$ENGINE" && echo yes || echo no)"
 t "engine: README.md injection targets tokens_raw.txt" "yes" \
   "$(grep -qF "echo 'README.md' >> tokens_raw.txt" "$ENGINE" && echo yes || echo no)"
+t "engine: README bilingual check reads from \$prfiles" "yes" \
+  "$(grep -qF 'printf '"'"'%s\n'"'"' "$prfiles" | grep -qxF '"'"'README.md'"'"'' "$ENGINE" && echo yes || echo no)"
 
 t_summary

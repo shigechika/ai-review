@@ -650,15 +650,40 @@ jobs:
             mv attach_list.txt attach_docs.txt
             # README bilingual pair: if this PR's changed docs include
             # exactly one of the ROOT-level README.md / README.ja.md
-            # (whole-line match against attach_docs.txt, so a nested
-            # docs/README.md does not trigger this), the untouched sibling
-            # is not visible anywhere else in the prompt — attach it as
-            # evidence too, so a claim mismatch between the two languages
-            # is actually checkable (see the docs-mode focus paragraph
-            # below). Treated as a citation, not a changed file, so it
-            # goes through the same prioritized, capped, deduplicated
-            # list as everything else in tokens_raw.txt, and a repo with
-            # no README.ja.md just 404s in the fetch loop for free.
+            # (whole-line match, so a nested docs/README.md does not
+            # trigger this), the untouched sibling is not visible
+            # anywhere else in the prompt — attach it as evidence too, so
+            # a claim mismatch between the two languages is actually
+            # checkable (see the docs-mode focus paragraph below).
+            # Treated as a citation, not a changed file, so it goes
+            # through the same prioritized, capped, deduplicated list as
+            # everything else in tokens_raw.txt, and a repo with no
+            # README.ja.md just 404s in the fetch loop for free.
+            #
+            # Matched against $prfiles (the files-API listing already
+            # fetched above for DOCS_MODE detection), not attach_docs.txt
+            # (gh pr diff --name-only / the delta file list): each
+            # $prfiles entry includes its previous_filename alongside its
+            # current filename, so a PR that RENAMES root README.md to
+            # something else (README.en.md, say) still matches
+            # README.md via the old name — attach_docs.txt only ever
+            # holds the new path and would silently miss this. DOCS_MODE=1
+            # already guarantees $prfiles was fetched successfully and is
+            # non-empty (see the check above), so no extra fail-safety is
+            # needed here.
+            #
+            # This is a deliberate scope widening, not just a rename fix:
+            # $prfiles is always the FULL cumulative PR file list, while
+            # attach_docs.txt in a delta round is only the new commits
+            # own files. So a delta round whose new commits touch neither
+            # README, but an earlier round in the same PR touched one, now
+            # still injects the sibling. On purpose — the bilingual claim
+            # spans the whole PR README pair, not just what one round of
+            # commits happened to touch, and an extra candidate that turns
+            # out irrelevant just 404s harmlessly in the fetch loop. Do
+            # not "fix" this back to delta-only scope without discussing
+            # the tradeoff first.
+            #
             # Written FIRST, ahead of the grep-extracted source tokens
             # below: tokens_raw.txt already routinely exceeds the 40-entry
             # head cap (and the 15-file fetch cap further down) on a
@@ -668,10 +693,10 @@ jobs:
             # cross-language mismatch. A guaranteed-priority citation is
             # the only way this check reliably fires.
             : > tokens_raw.txt
-            if grep -qxF 'README.md' attach_docs.txt && ! grep -qxF 'README.ja.md' attach_docs.txt; then
+            if printf '%s\n' "$prfiles" | grep -qxF 'README.md' && ! printf '%s\n' "$prfiles" | grep -qxF 'README.ja.md'; then
               echo 'README.ja.md' >> tokens_raw.txt
             fi
-            if grep -qxF 'README.ja.md' attach_docs.txt && ! grep -qxF 'README.md' attach_docs.txt; then
+            if printf '%s\n' "$prfiles" | grep -qxF 'README.ja.md' && ! printf '%s\n' "$prfiles" | grep -qxF 'README.md'; then
               echo 'README.md' >> tokens_raw.txt
             fi
             grep -oE '\.?[A-Za-z0-9_][A-Za-z0-9_./-]*\.(py|pyi|ts|tsx|js|mjs|go|rs|rb|java|kt|kts|c|h|cc|cpp|hpp|cs|php|swift|scala|sql|lua|sh|bash|yml|yaml|toml|cfg|json)' fulldiff.txt \
