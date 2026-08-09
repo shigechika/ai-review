@@ -37,8 +37,11 @@ name: PR Gate
 # already exist in the base repo only needs read access, which anyone
 # has. The signal is only trustworthy where read access is already a
 # real grant, i.e. a private repository (every reader was deliberately
-# invited) — so it is gated on `pr.base.repo.private === true` and never
-# applied on a public repo. A CONTRIBUTOR (has had a PR merged before,
+# invited) — so it is gated on `pr.base.repo.visibility === "private"`
+# (not the legacy `private` boolean, whose value for a GitHub Enterprise
+# "internal" repo — readable enterprise-wide, not just by invitees — is
+# not clearly documented) and never applied on a public or internal
+# repo. A CONTRIBUTOR (has had a PR merged before,
 # but holds no standing write access) is still deliberately NOT trusted
 # on association alone — only a maintainer reopening the closed PR (or
 # the same-repo-on-private-repo exception above) admits one.
@@ -221,10 +224,22 @@ jobs:
             // trustworthy only where read access itself is already a
             // real grant — a PRIVATE repository, where every reader was
             // deliberately invited. Restricted to
-            // `pr.base.repo.private === true` for exactly that reason;
-            // do not drop this guard to "simplify" the check, it is the
-            // difference between closing a real gap and opening the gate
-            // to the public internet.
+            // `pr.base.repo.visibility === "private"` for exactly that
+            // reason; do not drop this guard to "simplify" the check, it
+            // is the difference between closing a real gap and opening
+            // the gate to the public internet. Uses `visibility`
+            // (`"public"`/`"private"`/`"internal"`), not the legacy
+            // `private` boolean: on GitHub Enterprise, an "internal"
+            // repository is readable by every enterprise member, not
+            // just deliberately-invited collaborators, and GitHub's own
+            // docs do not clearly state whether the legacy `private`
+            // field is `true` or `false` for that visibility — so the
+            // boolean cannot be trusted to encode the "every reader was
+            // invited" assumption this check depends on, while the
+            // three-way `visibility` string can. Confirmed present on a
+            // real PR payload before relying on it (both fields already
+            // appear together on `base.repo` for the pull_request
+            // resource).
             //
             // Added after author_association was caught misreporting
             // CONTRIBUTOR for a genuine write-access org admin on a
@@ -243,7 +258,7 @@ jobs:
             // general rule the comment below documents) — accepted
             // because private-repo read access is itself already a
             // meaningful grant, unlike author_association alone.
-            const isTrustedSameRepoPR = isSameRepoPR && pr.base?.repo?.private === true;
+            const isTrustedSameRepoPR = isSameRepoPR && pr.base?.repo?.visibility === "private";
             if (isTrustedSameRepoPR) {
               core.info(`${author} opened a same-repo PR (head branch "${headRef}") on a private repository — trusted without relying on author_association`);
               await addReviewLabel();

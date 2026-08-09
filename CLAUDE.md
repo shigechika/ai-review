@@ -71,8 +71,20 @@ set — see "pr-gate.yml invariants" below.
   without confirming that is actually wanted — it is the exact
   false-positive class most likely to surprise a real contributor.
 - **`isTrustedSameRepoPR` (head branch lives in this repo, not a fork,
-  AND `pr.base.repo.private === true`) is also trusted, checked ahead of
-  `TRUSTED_ASSOCIATIONS`.** Added after `author_association` was caught
+  AND `pr.base.repo.visibility === "private"`) is also trusted, checked
+  ahead of `TRUSTED_ASSOCIATIONS`.** Uses `visibility`
+  (`"public"`/`"private"`/`"internal"`), never the legacy `private`
+  boolean — GitHub does not clearly document that boolean's value for a
+  GitHub Enterprise "internal" repo (readable enterprise-wide, not just
+  by deliberately-invited collaborators), so it cannot be trusted to
+  encode the "every reader was invited" assumption this check depends
+  on. Caught by `/code-review` on the PR that introduced the boolean
+  version, scored below its own reportability threshold (68/100, GitHub
+  docs don't confirm the behavior either way) but verified directly
+  against a real PR payload — `visibility` is present and correct
+  alongside `private` on `base.repo`, so there was no reason to keep the
+  weaker field once a stronger one was confirmed available. Added after
+  `author_association` was caught
   misreporting `CONTRIBUTOR` for a genuine write-access org admin in
   production on a private downstream caller repo (root-caused and
   tracked in shigechika/ai-review#37): the org membership was
