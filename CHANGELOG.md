@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.3](https://github.com/shigechika/ai-review/compare/v1.4.2...v1.4.3) (2026-08-09)
+
+
+### Bug Fixes
+
+* close 3 advisory edge cases in lint-embedded-shell.py ([#44](https://github.com/shigechika/ai-review/issues/44)) ([fe2e7ca](https://github.com/shigechika/ai-review/commit/fe2e7ca596ef594eec02a776dd079d13ab52ab46))
+
 ## [1.4.2](https://github.com/shigechika/ai-review/compare/v1.4.1...v1.4.2) (2026-08-09)
 
 
