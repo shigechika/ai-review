@@ -205,14 +205,26 @@ set — see "pr-gate.yml invariants" below.
   run log — they are the observability surface.
 - Keep `README.md` (English) and `README.ja.md` (Japanese) in sync.
 - `pr-gate.yml`'s logic lives in an `actions/github-script` block (plain
-  JS), which the bash/jq-only `tests/run_all.sh` harness cannot exercise —
-  there is no Node test coverage for it. `actionlint -shellcheck=` still
-  checks the surrounding YAML, but the admission logic itself is verified
-  by reasoning plus a real PR. `pr-gate-selftest.yml` dogfoods it on this
-  repo's own PRs the same way `selftest.yml` dogfoods ai-review.yml, with
-  one structural difference worth remembering: `pull_request_target`
-  always runs the workflow file as committed on the BASE branch, never the
-  PR's own proposed version (that is what makes it safe to use with a
+  JS), which the bash/jq-only `tests/run_all.sh` harness cannot exercise
+  directly — `tests/test_pr_gate.mjs` covers it instead: a Node file,
+  run by `run_all.sh` alongside the bash suites (no npm dependency,
+  `ubuntu-latest` ships Node already), that extracts the real `script:`
+  block from the committed YAML at test time (same principle
+  `extract_run()` applies to `ai-review.yml`'s `run:` block — never a
+  hand-retyped mirror) and runs it against mock `github`/`context`/`core`
+  objects across the trust-decision table (fork vs. same-repo,
+  public/private/internal visibility, bots, release-please ordering,
+  closed/reopened actions). Add a case there for every future bug the
+  same way `test_*.sh` already does for `ai-review.yml` — the two bugs
+  that motivated this file (public-repo gate bypass, the legacy
+  `private`-boolean-vs-`visibility` gap) both slipped past review
+  because nothing exercised them mechanically before. Still verified by
+  reasoning plus a real PR beyond what the table covers.
+  `pr-gate-selftest.yml` dogfoods the deployed behavior on this repo's
+  own PRs the same way `selftest.yml` dogfoods `ai-review.yml`, with one
+  structural difference worth remembering: `pull_request_target` always
+  runs the workflow file as committed on the BASE branch, never the PR's
+  own proposed version (that is what makes it safe to use with a
   write-capable token at all) — so a PR that changes `pr-gate.yml` is
   evaluated by the pre-change version, not itself. Real coverage of a
   `pr-gate.yml` change starts on the first PR opened after it merges, not
