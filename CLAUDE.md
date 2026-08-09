@@ -197,7 +197,11 @@ set — see "pr-gate.yml invariants" below.
   to that it has hung CI for hours in practice. The Python script
   shellchecks every `run:` block as a file instead (not over stdin),
   which doesn't hit the same bug; run both locally before every PR, same
-  as CI's `actionlint` job does.
+  as CI's `actionlint` job does. `tests/test_lint_embedded_shell.py`
+  (run by `tests/run_all.sh`, dispatched to `python3` alongside the
+  bash/`.mjs` suites) unit-tests the script's own logic directly
+  (implicit-Windows-shell detection, `shell: sh` support, quote-aware
+  `${{ }}` masking) — see issue #23 for the three cases it closes.
 - Extract the run block from the YAML and `bash -n` it.
 - The selftest workflow reviews every PR with the PR's **own** engine
   revision (relative `uses:`), so open a PR and read the sticky comment +

@@ -10,6 +10,7 @@ run_one() {
   echo "=== $1 ==="
   case "$1" in
     *.mjs) node "$1" ;;
+    *.py) python3 "$1" ;;
     *) bash "$1" ;;
   esac
   local rc=$?
@@ -18,7 +19,7 @@ run_one() {
 }
 
 run_one test_extraction.sh
-for f in test_*.sh test_*.mjs; do
+for f in test_*.sh test_*.mjs test_*.py; do
   [ "$f" = "test_extraction.sh" ] && continue
   run_one "$f"
 done
