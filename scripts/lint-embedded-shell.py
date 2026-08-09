@@ -84,21 +84,38 @@ def runs_on_is_windows(runs_on) -> bool:
     # false negative, not a regression, since this script never checked
     # runs-on at all before this fix.
     #
-    # A LIST containing "self-hosted" is different: GitHub-hosted labels
-    # (windows-latest, windows-2022, ...) are a fixed, GitHub-controlled
-    # vocabulary that reliably names the OS, but self-hosted runner
-    # labels are arbitrary strings the runner's own admin chose -- a
-    # Linux self-hosted box can validly be tagged "windows-sdk" to mean
-    # "builds the Windows SDK", not "runs Windows". A windows-* PREFIX is
-    # therefore not trustworthy once self-hosted is in the mix, so treat
-    # the whole runs-on as unknown (not Windows) in that case, same as
-    # any other unresolvable value.
+    # A LIST containing "self-hosted" needs a narrower rule than the
+    # windows-* PREFIX match used for GitHub-hosted labels. GitHub
+    # auto-assigns an EXACT "Windows"/"Linux"/"macOS" OS label (plus an
+    # architecture label like "X64"/"ARM64") to every self-hosted runner
+    # at registration time, alongside "self-hosted" and any custom labels
+    # its admin adds -- e.g. [self-hosted, Windows, X64] is GitHub's own
+    # standard shape (this is what ai-review's R2F1 on PR #44 flagged
+    # this function as wrongly treating as Bash). That auto-assigned
+    # EXACT "windows" label is trustworthy. A mere PREFIX match is not: a
+    # Linux self-hosted box can validly carry a custom label like
+    # "windows-sdk" ("builds the Windows SDK", not "runs Windows" -- this
+    # is what R1F1 on the same PR flagged the previous prefix-based
+    # version as wrongly treating as Windows). So for a self-hosted list,
+    # only an exact "windows" entry counts; a prefix match does not.
     if isinstance(runs_on, str):
+        # Known, accepted gap (not fixed, unlike the list branch above): a
+        # BARE STRING custom label -- runs-on: windows-sdk, with no list
+        # and no literal "self-hosted" token anywhere for this branch to
+        # key off of -- is exactly R1F1's failure mode again, and this
+        # branch still can't tell that shape apart from a GitHub-hosted
+        # windows-latest/windows-2022 label; both are just a string. Left
+        # as a prefix match on the judgment that GitHub's own documented
+        # self-hosted examples all use the list form (["self-hosted",
+        # ...]), so a bare custom label colliding with the windows-*
+        # prefix is a narrower, unconfirmed case rather than one seen in
+        # practice -- same bar issue #23's other two cases were held to
+        # before being picked up. Revisit if a real workflow hits it.
         return runs_on.strip().lower().startswith("windows")
     if isinstance(runs_on, list):
         labels = [x.strip().lower() for x in runs_on if isinstance(x, str)]
         if "self-hosted" in labels:
-            return False
+            return "windows" in labels
         return any(label.startswith("windows") for label in labels)
     return False
 

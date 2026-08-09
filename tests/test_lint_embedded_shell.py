@@ -52,6 +52,13 @@ t(
     _mod.runs_on_is_windows(["windows-latest"]),
 )
 t("runs_on_is_windows: unresolvable expression", False, _mod.runs_on_is_windows("${{ matrix.os }}"))
+# Known, accepted gap pinned deliberately: a bare-string custom
+# self-hosted label colliding with the windows-* prefix (no list, no
+# literal "self-hosted" for this branch to key off of) is still a false
+# positive here, unlike the list branch below. See the function's own
+# comment for why this was accepted rather than chased with a
+# version-fragile regex of GitHub's hosted image names.
+t("runs_on_is_windows: bare custom label windows-sdk (accepted gap, not fixed)", True, _mod.runs_on_is_windows("windows-sdk"))
 # PR #44 round-1 advisory (R1F1): a self-hosted runner's labels are
 # arbitrary strings its own admin chose -- a Linux box can validly be
 # tagged "windows-sdk" (builds the Windows SDK, does not run Windows).
@@ -63,10 +70,20 @@ t(
     False,
     _mod.runs_on_is_windows(["self-hosted", "windows-sdk"]),
 )
+# PR #44 round-2 advisory (R2F1): GitHub auto-assigns an EXACT
+# "Windows"/"Linux"/"macOS" label to every self-hosted runner at
+# registration, alongside self-hosted and any custom labels -- e.g.
+# [self-hosted, Windows, X64] is GitHub's own standard shape. That exact
+# label IS trustworthy, unlike the windows-sdk prefix case above.
 t(
-    "runs_on_is_windows: self-hosted with an exact Windows label -> still False (self-hosted labels are unverifiable)",
-    False,
-    _mod.runs_on_is_windows(["self-hosted", "Windows"]),
+    "runs_on_is_windows: self-hosted with GitHub's standard exact Windows label -> True (R2F1 fix)",
+    True,
+    _mod.runs_on_is_windows(["self-hosted", "Windows", "X64"]),
+)
+t(
+    "runs_on_is_windows: self-hosted with exact windows label, lowercase -> True",
+    True,
+    _mod.runs_on_is_windows(["self-hosted", "windows"]),
 )
 t("runs_on_is_windows: self-hosted, no windows-ish label", False, _mod.runs_on_is_windows(["self-hosted", "linux"]))
 
