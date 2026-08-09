@@ -76,17 +76,30 @@ def effective_default_shell(workflow_defaults: dict | None, job_defaults: dict |
 
 
 def runs_on_is_windows(runs_on) -> bool:
-    # runs-on can be a bare string, a list (e.g. self-hosted labels), or an
-    # unresolvable ${{ ... }} expression (matrix-driven OS). Only a literal
-    # windows-* string is treated as Windows; anything we cannot prove is
-    # Windows keeps today's behavior (assume bash) -- a matrix job that
-    # resolves to windows at runtime but is not literally spelled out here
-    # is a false negative, not a regression, since this script never
-    # checked runs-on at all before this fix.
+    # runs-on can be a bare string, a list, or an unresolvable
+    # ${{ ... }} expression (matrix-driven OS). Only a literal windows-*
+    # STRING is treated as Windows; anything we cannot prove is Windows
+    # keeps today's behavior (assume bash) -- a matrix job that resolves
+    # to windows at runtime but is not literally spelled out here is a
+    # false negative, not a regression, since this script never checked
+    # runs-on at all before this fix.
+    #
+    # A LIST containing "self-hosted" is different: GitHub-hosted labels
+    # (windows-latest, windows-2022, ...) are a fixed, GitHub-controlled
+    # vocabulary that reliably names the OS, but self-hosted runner
+    # labels are arbitrary strings the runner's own admin chose -- a
+    # Linux self-hosted box can validly be tagged "windows-sdk" to mean
+    # "builds the Windows SDK", not "runs Windows". A windows-* PREFIX is
+    # therefore not trustworthy once self-hosted is in the mix, so treat
+    # the whole runs-on as unknown (not Windows) in that case, same as
+    # any other unresolvable value.
     if isinstance(runs_on, str):
         return runs_on.strip().lower().startswith("windows")
     if isinstance(runs_on, list):
-        return any(isinstance(x, str) and x.strip().lower().startswith("windows") for x in runs_on)
+        labels = [x.strip().lower() for x in runs_on if isinstance(x, str)]
+        if "self-hosted" in labels:
+            return False
+        return any(label.startswith("windows") for label in labels)
     return False
 
 

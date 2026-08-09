@@ -46,9 +46,29 @@ def t_summary():
 t("runs_on_is_windows: windows-latest", True, _mod.runs_on_is_windows("windows-latest"))
 t("runs_on_is_windows: windows-2022", True, _mod.runs_on_is_windows("windows-2022"))
 t("runs_on_is_windows: ubuntu-latest", False, _mod.runs_on_is_windows("ubuntu-latest"))
-t("runs_on_is_windows: list with a windows label", True, _mod.runs_on_is_windows(["self-hosted", "Windows"]))
-t("runs_on_is_windows: list without a windows label", False, _mod.runs_on_is_windows(["self-hosted", "linux"]))
+t(
+    "runs_on_is_windows: list without self-hosted, windows label -> True",
+    True,
+    _mod.runs_on_is_windows(["windows-latest"]),
+)
 t("runs_on_is_windows: unresolvable expression", False, _mod.runs_on_is_windows("${{ matrix.os }}"))
+# PR #44 round-1 advisory (R1F1): a self-hosted runner's labels are
+# arbitrary strings its own admin chose -- a Linux box can validly be
+# tagged "windows-sdk" (builds the Windows SDK, does not run Windows).
+# Once "self-hosted" is in the list, a windows-* PREFIX is no longer
+# trustworthy, so this must be False (an implicit bash step there must
+# still be checked, not silently skipped).
+t(
+    "runs_on_is_windows: self-hosted with a windows-prefixed CUSTOM label -> False (R1F1 fix)",
+    False,
+    _mod.runs_on_is_windows(["self-hosted", "windows-sdk"]),
+)
+t(
+    "runs_on_is_windows: self-hosted with an exact Windows label -> still False (self-hosted labels are unverifiable)",
+    False,
+    _mod.runs_on_is_windows(["self-hosted", "Windows"]),
+)
+t("runs_on_is_windows: self-hosted, no windows-ish label", False, _mod.runs_on_is_windows(["self-hosted", "linux"]))
 
 t(
     "step_shell_dialect: no shell key, ubuntu runner -> bash",
