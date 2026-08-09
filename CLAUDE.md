@@ -177,6 +177,18 @@ set — see "pr-gate.yml invariants" below.
   general prose-quality review without discussing the tradeoff first —
   it was evaluated once already (README.ja.md rewrite, 2026-08-08) and
   deliberately kept out of the automated reviewer.
+- Never name a real downstream/family caller repo or org (e.g. a
+  specific private company/org name) in text that ships to a public
+  artifact — PR body, issue body, commit message, or code comment. This
+  repo is public; callers may be private. Genericize instead ("a
+  private downstream caller"). Required a force-push plus PR/issue body
+  edits to fix once already — check before pushing, not after.
+- A PR body accumulates edits across ai-review/advisor/`/code-review`
+  rounds as fixes land. Before merge, re-read the WHOLE body, not just
+  the newest section — a rationale or number from an earlier round (a
+  "deliberate" design choice that got reversed, a stale pass-count) can
+  silently go stale while later sections describe the corrected
+  version.
 
 ## Verifying changes
 
