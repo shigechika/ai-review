@@ -650,15 +650,52 @@ jobs:
             mv attach_list.txt attach_docs.txt
             # README bilingual pair: if this PR's changed docs include
             # exactly one of the ROOT-level README.md / README.ja.md
-            # (whole-line match against attach_docs.txt, so a nested
-            # docs/README.md does not trigger this), the untouched sibling
-            # is not visible anywhere else in the prompt — attach it as
-            # evidence too, so a claim mismatch between the two languages
-            # is actually checkable (see the docs-mode focus paragraph
-            # below). Treated as a citation, not a changed file, so it
-            # goes through the same prioritized, capped, deduplicated
-            # list as everything else in tokens_raw.txt, and a repo with
-            # no README.ja.md just 404s in the fetch loop for free.
+            # (whole-line match, so a nested docs/README.md does not
+            # trigger this), the untouched sibling is not visible
+            # anywhere else in the prompt — attach it as evidence too, so
+            # a claim mismatch between the two languages is actually
+            # checkable (see the docs-mode focus paragraph below).
+            # Treated as a citation, not a changed file, so it goes
+            # through the same prioritized, capped, deduplicated list as
+            # everything else in tokens_raw.txt, and a repo with no
+            # README.ja.md just 404s in the fetch loop for free.
+            #
+            # Two DIFFERENT questions, two DIFFERENT sources — do not
+            # collapse them onto one variable. That was tried and is the
+            # bug this comment now documents (R1F1 on this file own
+            # PR #42):
+            #
+            #   1. "Did README.md (or a rename of it) change AT ALL in
+            #      this PR?" -> $prfiles (the files-API listing already
+            #      fetched above for DOCS_MODE detection). Each entry
+            #      includes its previous_filename alongside its current
+            #      filename, so a PR that RENAMES root README.md to
+            #      something else (README.en.md, say) still matches
+            #      README.md via the old name. $prfiles is the FULL
+            #      cumulative PR file list, which is exactly what this
+            #      question needs: a rename from three rounds ago still
+            #      counts. DOCS_MODE=1 already guarantees $prfiles was
+            #      fetched successfully and is non-empty, so no extra
+            #      fail-safety is needed here.
+            #
+            #   2. "Is the OTHER (sibling) file content ALREADY visible in
+            #      what THIS round is about to send the model?" ->
+            #      attach_docs.txt (gh pr diff --name-only / the delta
+            #      file list), never $prfiles. attach_docs.txt is
+            #      correctly SCOPED to the current round (in delta mode,
+            #      only the new commits own files) — $prfiles is not, and
+            #      using it here was the bug: if round 1 touched
+            #      README.ja.md and round 2 (a later, separate delta
+            #      round) touches only README.md, $prfiles shows BOTH as
+            #      "changed in this PR" and the old exactly-one-of-two
+            #      check silently skipped injection — even though round
+            #      2 own prompt contains neither README.ja.md content
+            #      (not in this round delta) nor an attached copy (that is
+            #      exactly the gap this feature exists to close). Using
+            #      attach_docs.txt for this question keeps it correctly
+            #      scoped to "what round N can actually see" regardless of
+            #      what earlier rounds touched.
+            #
             # Written FIRST, ahead of the grep-extracted source tokens
             # below: tokens_raw.txt already routinely exceeds the 40-entry
             # head cap (and the 15-file fetch cap further down) on a
@@ -668,10 +705,10 @@ jobs:
             # cross-language mismatch. A guaranteed-priority citation is
             # the only way this check reliably fires.
             : > tokens_raw.txt
-            if grep -qxF 'README.md' attach_docs.txt && ! grep -qxF 'README.ja.md' attach_docs.txt; then
+            if printf '%s\n' "$prfiles" | grep -qxF 'README.md' && ! grep -qxF 'README.ja.md' attach_docs.txt; then
               echo 'README.ja.md' >> tokens_raw.txt
             fi
-            if grep -qxF 'README.ja.md' attach_docs.txt && ! grep -qxF 'README.md' attach_docs.txt; then
+            if printf '%s\n' "$prfiles" | grep -qxF 'README.ja.md' && ! grep -qxF 'README.md' attach_docs.txt; then
               echo 'README.md' >> tokens_raw.txt
             fi
             grep -oE '\.?[A-Za-z0-9_][A-Za-z0-9_./-]*\.(py|pyi|ts|tsx|js|mjs|go|rs|rb|java|kt|kts|c|h|cc|cpp|hpp|cs|php|swift|scala|sql|lua|sh|bash|yml|yaml|toml|cfg|json)' fulldiff.txt \
