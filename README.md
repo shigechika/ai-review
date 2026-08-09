@@ -128,8 +128,18 @@ Dependabot PRs are skipped by the engine itself.
        uses: shigechika/ai-review/.github/workflows/pr-gate.yml@v1
    ```
 
-   Trust is a single live signal: GitHub's own `author_association`
-   (`OWNER`/`MEMBER`/`COLLABORATOR`). A few cases are handled specially:
+   Trust rests on live GitHub signals, never a maintained allowlist file:
+   GitHub's own `author_association` (`OWNER`/`MEMBER`/`COLLABORATOR`),
+   and, on **private repositories only**, whether the pull request's head
+   branch lives in this same repository rather than a fork. On a private
+   repo, every reader was deliberately invited, so a same-repo PR there
+   is trusted too — this closes a real gap where `author_association`
+   can report `CONTRIBUTOR` for a genuine write-access org member/admin
+   whose organization membership visibility is set to private. This
+   check never applies on a public repo: there, opening a PR between two
+   branches that already exist in the base repo needs only read access —
+   which anyone has — so a same-repo branch alone would prove nothing.
+   A few cases are handled specially:
 
    - `dependabot[bot]`, `github-actions[bot]`, and same-repo
      `release-please--*` branches are always exempt, so routine

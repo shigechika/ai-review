@@ -17,15 +17,31 @@ name: PR Gate
 #     The usual pull_request_target caution therefore applies: this file
 #     must never check out PR content or run anything the PR authored.
 #
-# Trust is a single live signal — GitHub's own author_association on the
-# pull request (OWNER/MEMBER/COLLABORATOR) — plus a small hardcoded
-# allowlist for this repository's own automation accounts (dependabot[bot],
+# Trust rests on live GitHub signals, never a maintained allowlist file
+# that could go stale: author_association on the pull request
+# (OWNER/MEMBER/COLLABORATOR); a small hardcoded allowlist for this
+# repository's own automation accounts (dependabot[bot],
 # github-actions[bot]) so routine dependency/release PRs are never
-# auto-closed. There is no maintained allowlist file to go stale: every
-# check reads a value GitHub computes live from current repo permissions.
-# A CONTRIBUTOR (has had a PR merged before, but holds no standing write
-# access) is deliberately NOT trusted — only a maintainer reopening the
-# closed PR admits them.
+# auto-closed; and, on PRIVATE repositories only, whether the PR's head
+# branch lives in this same repository rather than a fork. That last one
+# exists because author_association alone has a real blind spot: it can
+# report CONTRIBUTOR for a genuine org member/admin whose organization
+# membership visibility is set to private (confirmed in production on a
+# downstream caller, shigechika/ai-review#37) — GitHub's
+# author_association computation does not reliably recognize private
+# memberships the way it recognizes public ones. A same-repo (non-fork)
+# head branch is evidence that SOMEONE had push access to create that
+# branch, which sidesteps the association blind spot — but it does NOT
+# by itself prove the person who opened THIS pull request has push
+# access: on a public repository, opening a PR between two branches that
+# already exist in the base repo only needs read access, which anyone
+# has. The signal is only trustworthy where read access is already a
+# real grant, i.e. a private repository (every reader was deliberately
+# invited) — so it is gated on `pr.base.repo.private === true` and never
+# applied on a public repo. A CONTRIBUTOR (has had a PR merged before,
+# but holds no standing write access) is still deliberately NOT trusted
+# on association alone — only a maintainer reopening the closed PR (or
+# the same-repo-on-private-repo exception above) admits one.
 #
 # On success this workflow adds the ai-review label (configurable via
 # review-label) and nothing else — it never posts findings and never
@@ -175,6 +191,9 @@ jobs:
               return;
             }
 
+            const headRef = pr.head?.ref ?? "";
+            const isSameRepoPR = pr.head?.repo?.full_name === `${context.repo.owner}/${context.repo.repo}`;
+
             // Same-repo release-please branches are never actually
             // reviewed — ai-review.yml's own job condition skips them
             // unconditionally, regardless of author or label. Labeling
@@ -182,15 +201,52 @@ jobs:
             // is coming; for this PR shape, one never will) even though
             // the PR is legitimately trusted (release-please usually
             // opens as the repo owner or a first-party token, so it
-            // would otherwise sail through the TRUSTED_ASSOCIATIONS
-            // check below). Mirrors ai-review.yml's own
-            // release-please--* / same-repo condition exactly.
-            const headRef = pr.head?.ref ?? "";
-            const isReleasePleaseBranch =
-              pr.head?.repo?.full_name === `${context.repo.owner}/${context.repo.repo}` &&
-              headRef.startsWith("release-please--");
+            // would otherwise sail through the checks below). Mirrors
+            // ai-review.yml's own release-please--* / same-repo
+            // condition exactly. Checked ahead of the general
+            // same-repo trust rule just below so this specific shape
+            // still gets no label.
+            const isReleasePleaseBranch = isSameRepoPR && headRef.startsWith("release-please--");
             if (isReleasePleaseBranch) {
               core.info(`Leaving release-please PR open, ungated: ${headRef}`);
+              return;
+            }
+
+            // A pull request whose head branch lives in THIS repository
+            // (not a fork) proves SOMEONE had push access to create that
+            // branch — but not necessarily the person who opened THIS
+            // pull request: on a PUBLIC repository, opening a PR between
+            // two branches that already exist in the base repo only
+            // needs read access, which anyone has. So this signal is
+            // trustworthy only where read access itself is already a
+            // real grant — a PRIVATE repository, where every reader was
+            // deliberately invited. Restricted to
+            // `pr.base.repo.private === true` for exactly that reason;
+            // do not drop this guard to "simplify" the check, it is the
+            // difference between closing a real gap and opening the gate
+            // to the public internet.
+            //
+            // Added after author_association was caught misreporting
+            // CONTRIBUTOR for a genuine write-access org admin on a
+            // private downstream caller repo (root-caused and tracked
+            // in shigechika/ai-review#37): the org membership was
+            // active/admin, but its visibility was private, and GitHub's
+            // author_association computation does not reliably recognize
+            // a private membership the way it recognizes a public one.
+            // Checked ahead of TRUSTED_ASSOCIATIONS so it also closes
+            // that gap without depending on the member ever making their
+            // membership public.
+            //
+            // Also checked ahead of the reopened-override branch below,
+            // which means a same-repo PR on a private repo is the one
+            // case where the author's own reopen IS honored (unlike the
+            // general rule the comment below documents) — accepted
+            // because private-repo read access is itself already a
+            // meaningful grant, unlike author_association alone.
+            const isTrustedSameRepoPR = isSameRepoPR && pr.base?.repo?.private === true;
+            if (isTrustedSameRepoPR) {
+              core.info(`${author} opened a same-repo PR (head branch "${headRef}") on a private repository — trusted without relying on author_association`);
+              await addReviewLabel();
               return;
             }
 
@@ -208,7 +264,12 @@ jobs:
             // to the normal check when the author reopened their own
             // rejected PR (GitHub always allows that, trusted or not),
             // so enforcement stays consistent instead of being undone by
-            // the same untrusted actor re-clicking reopen.
+            // the same untrusted actor re-clicking reopen. (A same-repo
+            // PR on a private repo never reaches this block at all — it
+            // already returned above via isTrustedSameRepoPR, which is
+            // the one case where the author's own reopen IS honored; see
+            // that check's comment for why that is an accepted
+            // exception rather than a hole in this one.)
             if (context.payload.action === "reopened") {
               const senderLogin = context.payload.sender?.login;
               if (senderLogin && senderLogin !== author) {

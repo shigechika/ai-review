@@ -61,15 +61,48 @@ set — see "pr-gate.yml invariants" below.
 - **Blocking is the point.** Unlike ai-review.yml's advisory contract, a
   rejected PR is actually closed. Do not soften this into a warning-only
   path — the whole value of the file is that it acts, not just reports.
-- **Trust is one live signal, no file to go stale.** `author_association`
-  (`OWNER`/`MEMBER`/`COLLABORATOR`) plus the hardcoded bot allowlist
-  (`dependabot[bot]`, `github-actions[bot]`) — deliberately no
-  `APPROVED_CONTRIBUTORS`-style file to maintain or forget to update.
-  `CONTRIBUTOR` (has had a PR merged before, holds no standing write
-  access) is intentionally NOT trusted; only a maintainer's reopen admits
-  one. Do not widen `TRUSTED_ASSOCIATIONS` without confirming that is
-  actually wanted — it is the exact false-positive class most likely to
-  surprise a real contributor.
+- **Trust rests on live GitHub signals, no file to go stale.**
+  `author_association` (`OWNER`/`MEMBER`/`COLLABORATOR`) plus the
+  hardcoded bot allowlist (`dependabot[bot]`, `github-actions[bot]`) —
+  deliberately no `APPROVED_CONTRIBUTORS`-style file to maintain or
+  forget to update. `CONTRIBUTOR` (has had a PR merged before, holds no
+  standing write access) is intentionally NOT trusted; only a
+  maintainer's reopen admits one. Do not widen `TRUSTED_ASSOCIATIONS`
+  without confirming that is actually wanted — it is the exact
+  false-positive class most likely to surprise a real contributor.
+- **`isTrustedSameRepoPR` (head branch lives in this repo, not a fork,
+  AND `pr.base.repo.private === true`) is also trusted, checked ahead of
+  `TRUSTED_ASSOCIATIONS`.** Added after `author_association` was caught
+  misreporting `CONTRIBUTOR` for a genuine write-access org admin in
+  production on a private downstream caller repo (root-caused and
+  tracked in shigechika/ai-review#37): the org membership was
+  `active`/`admin`, but its **visibility was set to private**, and GitHub's
+  `author_association` computation does not reliably recognize a private
+  membership the way it recognizes a public one or a direct repo
+  collaborator grant.
+  **The private-repo restriction is load-bearing, not a nicety — do not
+  drop it.** A same-repo head branch only proves someone once had push
+  access to create it; it does NOT prove the person who opened THIS pull
+  request has push access, because opening a PR between two branches
+  that already exist in the base repo needs only read access. On a
+  public repo, read access is universal, so an unrestricted version of
+  this check would let anyone open a spam PR against any two stale
+  branches and sail straight past the gate with the label attached — the
+  exact class of PR the gate exists to stop, on this repo's own public
+  callers. A private repo is different: every reader was deliberately
+  invited, so read access there is itself a real grant. This was caught
+  by advisor review before merge, not by the selftest (which cannot
+  exercise a second, differently-permissioned account) — if this
+  restriction is ever weakened, re-verify with a non-collaborator account
+  against a public repo, not by reasoning alone.
+  Costs no extra API call (`pr.head.repo`/`pr.base.repo` are already in
+  the webhook payload; `pr.head.repo.full_name` is the same field
+  `isReleasePleaseBranch` already read). Do not "fix" the original gap by
+  instead querying org membership directly — the workflow's repo-scoped
+  `GITHUB_TOKEN` is not itself an org member, so `GET
+  /orgs/{org}/members/{username}` degrades to the public-only check for
+  that identity and would not have caught this case either; this was
+  verified empirically before picking the same-repo-branch approach.
 - **`vars.AI_REVIEW_DISABLE_GATE` is the one kill switch.** It resolves
   against the calling repository (same as every other `vars.*` this repo
   reads) — keep it that way so a caller can flip the file to a no-op
