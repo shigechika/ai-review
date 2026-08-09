@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.1](https://github.com/shigechika/ai-review/compare/v1.4.0...v1.4.1) (2026-08-09)
+
+
+### Bug Fixes
+
+* trust same-repo PRs on private repos over author_association ([#38](https://github.com/shigechika/ai-review/issues/38)) ([c406276](https://github.com/shigechika/ai-review/commit/c406276d5cd5d63cc0fbe11df556d0050009eaf7))
+
 ## [1.4.0](https://github.com/shigechika/ai-review/compare/v1.3.1...v1.4.0) (2026-08-08)
 
 
