@@ -226,20 +226,25 @@ set — see "pr-gate.yml invariants" below.
   "deliberate" design choice that got reversed, a stale pass-count) can
   silently go stale while later sections describe the corrected
   version.
-- A test built on `awk '/start/,/end/' | grep -qF X` (isolate a code
-  span, then check something about it) has a vacuous-pass failure mode:
-  if the `start`/`end` anchor stops matching the engine — a line got
-  reworded, code moved — the awk range silently extracts nothing, and
-  `grep -qF X` on empty input reports "not found" exactly like a real
-  pass does. The anchor breaking and the check actually passing become
-  indistinguishable. Assert the extraction is non-empty as its own,
-  separate check before asserting anything about its content (see
-  `test_review_override.sh`'s "fetch block extracted" assertion,
-  added after `/code-review` caught this on PR #47 — a re-anchor alone,
-  done once already on that same test file, does not fix this; it only
-  moves where the anchor can break). Verify a new check like this the
-  same way: mutate the engine so the anchor no longer matches, confirm
-  the test now FAILS instead of silently passing.
+- A NEGATIVE structural check built on `awk '/start/,/end/' | grep -qF X`
+  (isolate a code span, then assert it does NOT contain X) has a
+  vacuous-pass failure mode: if the start anchor stops matching the
+  engine — a line got reworded, code moved — the awk range extracts
+  nothing, and `grep -qF X` on empty input reports "not found", which
+  is exactly the value the assertion expects. The anchor breaking and
+  the check really passing become indistinguishable. The other shapes
+  fail differently, not silently-safe either: a positive "does contain"
+  check fails loudly on a broken start anchor, but a broken END anchor
+  makes awk emit from the matched start through EOF, so a positive
+  check can pass on text far outside the intended span. Assert the
+  extraction is non-empty as its own, separate check before asserting
+  anything about its content (see `test_review_override.sh`'s "fetch
+  block extracted" assertion, added after `/code-review` caught this
+  on PR #47 — a re-anchor alone, done once already on that same test
+  file, does not fix this; it only moves where the anchor can break).
+  Verify a new check like this the same way: mutate the engine so the
+  anchor no longer matches, confirm the test now FAILS instead of
+  silently passing.
 
 ## Verifying changes
 
