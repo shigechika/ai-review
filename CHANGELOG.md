@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.0](https://github.com/shigechika/ai-review/compare/v1.4.3...v1.5.0) (2026-08-10)
+
+
+### Features
+
+* support REVIEW.md as a repository-specific review override ([#47](https://github.com/shigechika/ai-review/issues/47)) ([10d40d8](https://github.com/shigechika/ai-review/commit/10d40d89c6ebfacee0cdef8b00d823b874d8f2b1))
+
 ## [1.4.3](https://github.com/shigechika/ai-review/compare/v1.4.2...v1.4.3) (2026-08-09)
 
 
