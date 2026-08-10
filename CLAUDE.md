@@ -226,6 +226,20 @@ set — see "pr-gate.yml invariants" below.
   "deliberate" design choice that got reversed, a stale pass-count) can
   silently go stale while later sections describe the corrected
   version.
+- A test built on `awk '/start/,/end/' | grep -qF X` (isolate a code
+  span, then check something about it) has a vacuous-pass failure mode:
+  if the `start`/`end` anchor stops matching the engine — a line got
+  reworded, code moved — the awk range silently extracts nothing, and
+  `grep -qF X` on empty input reports "not found" exactly like a real
+  pass does. The anchor breaking and the check actually passing become
+  indistinguishable. Assert the extraction is non-empty as its own,
+  separate check before asserting anything about its content (see
+  `test_review_override.sh`'s "fetch block extracted" assertion,
+  added after `/code-review` caught this on PR #47 — a re-anchor alone,
+  done once already on that same test file, does not fix this; it only
+  moves where the anchor can break). Verify a new check like this the
+  same way: mutate the engine so the anchor no longer matches, confirm
+  the test now FAILS instead of silently passing.
 
 ## Verifying changes
 
