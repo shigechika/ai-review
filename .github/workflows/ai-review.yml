@@ -487,11 +487,16 @@ jobs:
           # FILES_TOTAL_CAP is 128 KiB, lower than the 192 KiB the
           # pre-merge revision used: a delta round adds up to 100 KB of
           # new-commits diff on top of the full PR diff, and the combined
-          # ceiling (diff 100 KB + delta 100 KB + guidance 96 KiB + files
-          # 128 KiB) should stay in the same band as before the merge.
-          # Callers can override it via the max-total-file-bytes input.
+          # ceiling (diff 100 KB + delta 100 KB + guidance 96 KiB + review
+          # override 8 KiB + files 128 KiB) should stay in the same band
+          # as before the merge. Callers can override FILES_TOTAL_CAP via
+          # the max-total-file-bytes input.
           GUIDANCE_CAP=49152          # per guidance file
           GUIDANCE_TOTAL_CAP=98304    # all guidance files combined
+          REVIEW_OVERRIDE_CAP=8192    # REVIEW.md, its own budget — see
+                                      # the fetch block below for why it
+                                      # is not folded into the two caps
+                                      # above
           FILE_CAP=49152              # per changed file
           FILES_TOTAL_CAP=131072      # all changed files combined
           FILE_COUNT_CAP=15
@@ -624,13 +629,13 @@ jobs:
           # oversized blobs) — see that block comment above for the full
           # argument, not repeated here.
           #
-          # Deliberately its own file and its own cap, NOT folded into the
-          # guidance loop or GUIDANCE_TOTAL_CAP above: REVIEW.md is an
-          # override the model must treat as higher-priority than general
-          # project guidance (see where it is spliced into the system
-          # prompt below), not more context competing in the same budget —
-          # a large CLAUDE.md would otherwise silently starve it of space
-          # simply by being fetched first in that loop.
+          # Deliberately its own cap (REVIEW_OVERRIDE_CAP, set in the Byte
+          # caps block above), NOT folded into GUIDANCE_TOTAL_CAP: REVIEW.md
+          # is an override the model must treat as higher-priority than
+          # general project guidance (see where it is spliced into the
+          # system prompt below), not more context competing in the same
+          # budget — a large CLAUDE.md would otherwise silently starve it
+          # of space simply by being fetched first in that loop.
           #
           # Deliberately smaller than GUIDANCE_CAP, not copied from it:
           # REVIEW.md is meant to hold a short, focused list of rules a
@@ -640,7 +645,6 @@ jobs:
           # risk Anthropic notes for their own equivalent file. 8 KiB is
           # generous for a rules list; a caller that needs more is a signal
           # the content belongs in CLAUDE.md instead.
-          REVIEW_OVERRIDE_CAP=8192
           : > review_override.txt
           rmeta=$(gh api "repos/$GH_REPO/contents/REVIEW.md?ref=$BASE_SHA" \
                    --jq 'select(.type=="file" and .encoding=="base64") | "\(.size)\t\(.content)"' 2>/dev/null || true)

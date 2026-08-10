@@ -44,13 +44,17 @@ t "review-override: block covers additions the default reporting bar would exclu
 t "engine: REVIEW.md fetched at BASE_SHA, not HEAD" "yes" \
   "$(grep -qF 'repos/$GH_REPO/contents/REVIEW.md?ref=$BASE_SHA' "$ENGINE" && echo yes || echo no)"
 
-t "engine: REVIEW.md has its own cap, separate from GUIDANCE_TOTAL_CAP" "yes" \
+t "engine: REVIEW.md has its own cap, named in the central Byte caps block" "yes" \
   "$(grep -qF 'REVIEW_OVERRIDE_CAP=8192' "$ENGINE" && echo yes || echo no)"
 
 # The fetch block must sit OUTSIDE the guidance for/done loop, i.e. after
 # its closing `done`, not sharing guidance_total's budget accounting.
+# Anchored on the fetch line itself (not the cap assignment, which now
+# lives in the Byte caps block far above this code) so the range stays
+# scoped to the fetch/assemble logic regardless of where the constant is
+# declared.
 t "engine: REVIEW.md fetch does not touch guidance_total" "yes" \
-  "$(awk '/REVIEW_OVERRIDE_CAP=8192/,/^          fi$/' "$ENGINE" | grep -qF 'guidance_total' && echo no || echo yes)"
+  "$(awk '/rmeta=\$\(gh api "repos\/\$GH_REPO\/contents\/REVIEW.md/,/^          fi$/' "$ENGINE" | grep -qF 'guidance_total' && echo no || echo yes)"
 
 t "engine: review_override_block is spliced ahead of focus_para in the system prompt" "yes" \
   "$(grep -qF '"$review_override_block""$focus_para"' "$ENGINE" && echo yes || echo no)"
