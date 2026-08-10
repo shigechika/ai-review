@@ -16,8 +16,8 @@ cd "$(dirname "${BASH_SOURCE[0]}")"
 # test_docs_mode.sh's README-sibling section handles the same shape.
 cond_file="/tmp/review_override_cond.txt"
 extract_between 'if [ -s review_override.txt ]; then' "review_override_block=''" > "$cond_file"
-echo "fi" >> "$cond_file"
 [ -s "$cond_file" ] || { echo "FAIL: could not extract the review_override_block conditional"; exit 1; }
+echo "fi" >> "$cond_file"
 
 run_review_override() { # review_override_content ("" means file absent)
   local dir
@@ -52,9 +52,14 @@ t "engine: REVIEW.md has its own cap, named in the central Byte caps block" "yes
 # Anchored on the fetch line itself (not the cap assignment, which now
 # lives in the Byte caps block far above this code) so the range stays
 # scoped to the fetch/assemble logic regardless of where the constant is
-# declared.
+# declared. Extraction is asserted non-empty FIRST: an anchor that stops
+# matching the engine would otherwise produce an empty $fetch_block, whose
+# absence of "guidance_total" is indistinguishable from a real pass.
+fetch_block="$(awk '/rmeta=\$\(gh api "repos\/\$GH_REPO\/contents\/REVIEW.md/,/^          fi$/' "$ENGINE")"
+t "engine: REVIEW.md fetch block extracted" "yes" \
+  "$([ -n "$fetch_block" ] && echo yes || echo no)"
 t "engine: REVIEW.md fetch does not touch guidance_total" "yes" \
-  "$(awk '/rmeta=\$\(gh api "repos\/\$GH_REPO\/contents\/REVIEW.md/,/^          fi$/' "$ENGINE" | grep -qF 'guidance_total' && echo no || echo yes)"
+  "$(printf '%s' "$fetch_block" | grep -qF 'guidance_total' && echo no || echo yes)"
 
 t "engine: review_override_block is spliced ahead of focus_para in the system prompt" "yes" \
   "$(grep -qF '"$review_override_block""$focus_para"' "$ENGINE" && echo yes || echo no)"
