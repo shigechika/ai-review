@@ -16,7 +16,14 @@ PRが開かれるたびに（callerが`synchronize`を有効にしていれば�
 
 1. PRのタイトル・説明、**リポジトリのガイダンスファイル**（`CLAUDE.md`・
    `AGENTS.md`・`.github/copilot-instructions.md`）、**変更されたファイル
-   の全文**、そしてdiffからレビュー用のプロンプトを組み立てます。
+   の全文**、そしてdiffからレビュー用のプロンプトを組み立てます。リポジトリ
+   ルートに**`REVIEW.md`**があれば、それは他の全てより先に注入され、
+   デフォルトの着眼点・重大度判定と食い違う箇所ではそちらが優先されます
+   —重大度をより厳しくする、特定パスをスキップする、常にチェックする
+   項目を追加する、といったリポジトリ固有のルールを書くのに使えます。
+   ただし出力フォーマット（指摘のマーカー・重大度の値・ledger）を変える
+   ことはできません。存在しない場合は他のガイダンスファイルと同様に単に
+   スキップされます。
 2. モデルに最大3件までの指摘を求めます。各指摘には、具体的にどの入力・
    状態で失敗するかの説明、重大度（`blocking`または`advisory`）、そして
    厳密な出力フォーマットが要求されます。
@@ -174,7 +181,11 @@ DependabotのPR・同一リポジトリの`release-please--*`ブランチは、�
   BASEリビジョンに`CLAUDE.md`・`AGENTS.md`・
   `.github/copilot-instructions.md`のいずれも存在しないというだけなので、
   問題ありません。
-- `::notice::ai-review context: docs_mode=… delta_mode=… diff=…B …` —
+- `::notice::REVIEW.md: sent N of M bytes` — BASEリビジョンに`REVIEW.md`
+  が存在する場合のみ表示されます。表示されない場合は単にファイルが
+  存在しないだけなので、問題ありません。
+- `::notice::ai-review context: docs_mode=… delta_mode=… diff=…B …
+  review_override=…B …` —
   実際にモデルへ送った内容を要約した行が1行出力されます。`diff=0B`に
   なっていたり、この行自体が出力されていない場合は、diffの取得に失敗して
   います。

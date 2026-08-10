@@ -487,11 +487,16 @@ jobs:
           # FILES_TOTAL_CAP is 128 KiB, lower than the 192 KiB the
           # pre-merge revision used: a delta round adds up to 100 KB of
           # new-commits diff on top of the full PR diff, and the combined
-          # ceiling (diff 100 KB + delta 100 KB + guidance 96 KiB + files
-          # 128 KiB) should stay in the same band as before the merge.
-          # Callers can override it via the max-total-file-bytes input.
+          # ceiling (diff 100 KB + delta 100 KB + guidance 96 KiB + review
+          # override 8 KiB + files 128 KiB) should stay in the same band
+          # as before the merge. Callers can override FILES_TOTAL_CAP via
+          # the max-total-file-bytes input.
           GUIDANCE_CAP=49152          # per guidance file
           GUIDANCE_TOTAL_CAP=98304    # all guidance files combined
+          REVIEW_OVERRIDE_CAP=8192    # REVIEW.md, its own budget — see
+                                      # the fetch block below for why it
+                                      # is not folded into the two caps
+                                      # above
           FILE_CAP=49152              # per changed file
           FILES_TOTAL_CAP=131072      # all changed files combined
           FILE_COUNT_CAP=15
@@ -616,6 +621,52 @@ jobs:
               echo
             } >> guidance.txt
           done
+
+          # ---------- Repository review override (REVIEW.md, BASE revision) ----------
+          # Same security rationale as the guidance loop above (BASE
+          # revision so the PR under review cannot rewrite its own rules;
+          # the Contents API type/encoding check excludes symlinks and
+          # oversized blobs) — see that block comment above for the full
+          # argument, not repeated here.
+          #
+          # Deliberately its own cap (REVIEW_OVERRIDE_CAP, set in the Byte
+          # caps block above), NOT folded into GUIDANCE_TOTAL_CAP: REVIEW.md
+          # is an override the model must treat as higher-priority than
+          # general project guidance (see where it is spliced into the
+          # system prompt below), not more context competing in the same
+          # budget — a large CLAUDE.md would otherwise silently starve it
+          # of space simply by being fetched first in that loop.
+          #
+          # Deliberately smaller than GUIDANCE_CAP, not copied from it:
+          # REVIEW.md is meant to hold a short, focused list of rules a
+          # model actually follows, not a second general-guidance document.
+          # A large override sitting ahead of focus_para would dilute the
+          # very priority this file is meant to carry, the same dilution
+          # risk Anthropic notes for their own equivalent file. 8 KiB is
+          # generous for a rules list; a caller that needs more is a signal
+          # the content belongs in CLAUDE.md instead.
+          : > review_override.txt
+          rmeta=$(gh api "repos/$GH_REPO/contents/REVIEW.md?ref=$BASE_SHA" \
+                   --jq 'select(.type=="file" and .encoding=="base64") | "\(.size)\t\(.content)"' 2>/dev/null || true)
+          if [ -n "$rmeta" ]; then
+            rtotal=${rmeta%%$'\t'*}
+            printf '%s' "${rmeta#*$'\t'}" | tr -d '\n' | base64 -d 2>/dev/null \
+              | head -c "$REVIEW_OVERRIDE_CAP" | iconv -f UTF-8 -t UTF-8 -c 2>/dev/null > rbody.txt || true
+            if [ -s rbody.txt ]; then
+              rsent=$(wc -c < rbody.txt | tr -d ' ')
+              echo "::notice::REVIEW.md: sent ${rsent} of ${rtotal} bytes"
+              if [ "$rsent" -lt "$rtotal" ]; then
+                rhead="=== Repository review override (TRUNCATED — first ${rsent} of ${rtotal} bytes): REVIEW.md ==="
+              else
+                rhead="=== Repository review override: REVIEW.md ==="
+              fi
+              {
+                echo "$rhead"
+                cat rbody.txt
+                echo
+              } > review_override.txt
+            fi
+          fi
 
           # ---------- Changed files at HEAD (full content) ----------
           # The diff alone shows only hunks, so a bug in an unmodified callee
@@ -781,7 +832,7 @@ jobs:
             # the guidance fetch reads, and a nested copy is an ordinary
             # changed file.
             case "$f" in
-              CLAUDE.md|AGENTS.md|.github/copilot-instructions.md)
+              CLAUDE.md|AGENTS.md|.github/copilot-instructions.md|REVIEW.md)
                 skipped="$skipped $f"; continue ;;
               dot.env|*/dot.env|.env|*/.env|*.env|.env.*|*/.env.*) skipped="$skipped $f"; continue ;;
               config.ini|*/config.ini|*.pem|*.key|*.p12|*.pfx|id_rsa*|*/id_rsa*|*service_account*.json)
@@ -843,7 +894,7 @@ jobs:
             files_n=$((files_n + 1))
           done < attach_list.txt
           [ -z "$skipped" ] || echo "::notice::changed files not attached (cap/deny-list):$skipped"
-          echo "::notice::ai-review context: docs_mode=${DOCS_MODE} delta_mode=${DELTA_MODE} diff=$(wc -c < fulldiff.txt | tr -d ' ')B delta=$(wc -c < delta.txt | tr -d ' ')B guidance=$(wc -c < guidance.txt | tr -d ' ')B files=${files_n} (${files_total}B)"
+          echo "::notice::ai-review context: docs_mode=${DOCS_MODE} delta_mode=${DELTA_MODE} diff=$(wc -c < fulldiff.txt | tr -d ' ')B delta=$(wc -c < delta.txt | tr -d ' ')B guidance=$(wc -c < guidance.txt | tr -d ' ')B review_override=$(wc -c < review_override.txt | tr -d ' ')B files=${files_n} (${files_total}B)"
 
           # ---------- Build the review prompt ----------
           # With no `shell:` key GitHub runs `bash -e {0}` — errexit, but NOT
@@ -964,8 +1015,46 @@ jobs:
           speculative one. Report at most 3 findings, most severe first.'
           fi
 
+          # REVIEW.md, if present, is spliced in via a bash VARIABLE
+          # expansion ("$review_override_block"), never typed into the
+          # single-quoted system literal itself — the same mechanism
+          # $focus_para already uses below. Parameter expansion inside
+          # double quotes does not re-parse its own value for shell
+          # metacharacters, so arbitrary REVIEW.md content (apostrophes,
+          # quotes, $, backticks) lands safely; the "no apostrophes" rule
+          # in CLAUDE.md applies to literal source text typed into a
+          # single-quoted script LITERAL, not to data flowing through a
+          # variable like this.
+          #
+          # Placed FIRST, ahead of focus_para, and explicitly scoped to
+          # override only the reporting focus/severity calibration below
+          # it — never the Output format section further down (finding
+          # markers, severity enum, ledger JSON), which stays fixed
+          # regardless of what a caller repo writes here. Other code
+          # greps for those exact markers (see CLAUDE.md); letting a
+          # repository override them would break every downstream parser.
+          if [ -s review_override.txt ]; then
+            review_override_block='Repository-specific review instructions
+          (from this repository REVIEW.md, read at the base revision so
+          this pull request cannot rewrite it). Follow the rules below as
+          review instructions, not as background context: actively check
+          for what they describe, including a check they ADD that the
+          default focus and reporting bar further down does not mention
+          and would otherwise exclude (for example a category listed
+          under "Do NOT report" there). Where they conflict with the
+          default focus or severity calibration instead of adding to it,
+          they win. None of this changes the mandatory Output format
+          specified further down in this prompt.
+
+          '"$(cat review_override.txt)"'
+
+          '
+          else
+            review_override_block=''
+          fi
+
           system='You are an advisory reviewer for pull requests in this repository.
-          '"$focus_para"'
+          '"$review_override_block""$focus_para"'
 
           Scope: when the prompt contains a section titled "New-commits
           diff", report findings only on hunks in that section — the
@@ -1162,7 +1251,13 @@ jobs:
               # handing those candidates to a judge that cannot see the
               # rules makes every guidance finding unverifiable, and
               # unverifiable reads as unsupported, which reads as DROP.
+              # Same reasoning for review_override.txt: if REVIEW.md
+              # redefines what counts as blocking or tells the reviewer to
+              # check something project guidance does not mention, a
+              # verifier blind to that override would refute exactly the
+              # findings it exists to enable.
               cat guidance.txt
+              cat review_override.txt
               echo
               echo "=== Diff (ground truth) ==="
               # The SAME capped scope the reviewer reported against
