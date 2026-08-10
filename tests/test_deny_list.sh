@@ -20,6 +20,7 @@ classify() {
 }
 
 t "deny CLAUDE.md"                    "SKIP"   "$(classify CLAUDE.md)"
+t "deny REVIEW.md"                    "SKIP"   "$(classify REVIEW.md)"
 t "deny AGENTS.md"                    "SKIP"   "$(classify AGENTS.md)"
 t "deny copilot-instructions"         "SKIP"   "$(classify .github/copilot-instructions.md)"
 t "deny dot.env"                      "SKIP"   "$(classify dot.env)"
@@ -47,6 +48,7 @@ t "deny csv"                          "SKIP"   "$(classify history/big.csv)"
 t "allow python"                      "ATTACH" "$(classify analytics/core.py)"
 t "allow yaml workflow"               "ATTACH" "$(classify .github/workflows/ai-review.yml)"
 t "allow nested CLAUDE.md (docs copy)" "ATTACH" "$(classify docs/CLAUDE.md)"
+t "allow nested REVIEW.md (docs copy)" "ATTACH" "$(classify docs/REVIEW.md)"
 t "allow environment.py"              "ATTACH" "$(classify environment.py)"
 t "allow envelope.ts"                 "ATTACH" "$(classify src/envelope.ts)"
 t "allow README.md"                   "ATTACH" "$(classify README.md)"

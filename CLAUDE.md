@@ -44,6 +44,43 @@ set — see "pr-gate.yml invariants" below.
   attached, however small. Anchored basename patterns in the `case`
   deny-list need a `*/` twin to match nested paths; pure suffix patterns
   (`*.env`, `*.pem`) already cross `/`.
+- **`REVIEW.md` overrides focus and severity, never the output format.**
+  Modeled on Anthropic's own Code Review product (`REVIEW.md` there too):
+  a caller repo can redefine what counts as blocking, add repo-specific
+  checks, or narrow the reporting bar — but it cannot touch the
+  `===FINDING===`/`===LEDGER===` markers, the `blocking`/`advisory`
+  enum, or the ledger JSON shape, because other code (this file's own
+  parsers, the ledger merge/cap jq programs, downstream tooling that
+  greps the sticky comment) depends on those staying fixed regardless of
+  what any repository writes. The system-prompt text that splices it in
+  says so explicitly ("changes the mandatory Output format") — do not
+  let a future edit blur that line by letting `REVIEW.md` content get
+  anywhere near the Output format section itself.
+  The splice text must tell the model to actively follow `REVIEW.md` as
+  instructions, not merely show it as background — this was caught in
+  review before merge: an early draft only said the override "wins where
+  it conflicts" with the default focus, which is a no-op for a rule that
+  *adds* a check the default focus (and docs-mode's own closed "Do NOT
+  report" list) never mentions, since nothing there conflicts with an
+  addition. The current wording says so explicitly ("actively check for
+  what they describe, including a check they ADD... and would otherwise
+  be excluded"). Keep that framing if this text is ever reworded.
+  Read at BASE (same rationale as `CLAUDE.md`/`AGENTS.md`/
+  `.github/copilot-instructions.md` — the PR under review must not be
+  able to rewrite the rules it is reviewed against) and deny-listed from
+  changed-file attachment for the same reason those three are. Kept on
+  its OWN byte budget (`REVIEW_OVERRIDE_CAP`, 8 KiB — deliberately
+  smaller than `GUIDANCE_CAP`'s 48 KiB, not folded into
+  `GUIDANCE_TOTAL_CAP`'s shared pool either): a large `CLAUDE.md` fetched
+  first in the guidance loop would otherwise silently starve it of
+  space, backwards for a file meant to take priority; and a `REVIEW.md`
+  itself is meant to carry a short, focused rule list, not a second
+  general-guidance document — a long one sitting ahead of `focus_para`
+  would dilute the very priority it exists to carry (the same tradeoff
+  Anthropic's own docs call out for their equivalent file). The verifier
+  call needs it too, for the same reason it already gets `guidance.txt`:
+  a judge blind to a repo's own override refutes the exact findings that
+  override exists to enable.
 
 ## pr-gate.yml invariants — opposite by design, do not blur with ai-review.yml
 

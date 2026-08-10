@@ -16,7 +16,13 @@ engine:
 1. Builds a review prompt from the PR title/description, the **repository
    guidance files** (`CLAUDE.md`, `AGENTS.md`,
    `.github/copilot-instructions.md`), the **full contents of the changed
-   files**, and the diff.
+   files**, and the diff. An optional **`REVIEW.md`** at the repository
+   root is spliced in ahead of everything else and takes precedence over
+   the default focus and severity calibration wherever the two conflict —
+   useful for repository-specific rules (stricter severity, paths to
+   skip, checks to always run). It cannot change the fixed output format
+   (finding markers, severity values, the ledger). Missing entirely, it
+   is simply skipped, the same as any other guidance file.
 2. Asks the model for at most 3 findings, each with a named failing
    input/state, a severity (`blocking`/`advisory`), and a strict output
    format.
@@ -167,9 +173,12 @@ itself — and check the `review` job's log:
   guidance file present in your repository. Missing entirely means the
   engine found no `CLAUDE.md`/`AGENTS.md`/`.github/copilot-instructions.md`
   at the base revision, which is normal if you have none.
-- `::notice::ai-review context: docs_mode=… delta_mode=… diff=…B …` — one
-  line summarizing what was actually sent to the model. `diff=0B` or a
-  missing line means the diff fetch failed.
+- `::notice::REVIEW.md: sent N of M bytes` — appears only if a `REVIEW.md`
+  is present at the base revision. Missing entirely means you have none,
+  which is normal.
+- `::notice::ai-review context: docs_mode=… delta_mode=… diff=…B …
+  review_override=…B …` — one line summarizing what was actually sent to
+  the model. `diff=0B` or a missing line means the diff fetch failed.
 - `::warning::AI_REVIEW_ENDPOINT / AI_REVIEW_API_KEY not set — skipping AI
   review` means exactly what it says — the two secrets below are missing
   or empty on this repository (or this is a fork PR, which never gets
