@@ -278,12 +278,31 @@ Because the override wins by design, a duplicated explanation is worse
 than redundant: a stale sentence here would out-rank a corrected one in
 guidance indefinitely.
 
-### Three drafting hazards
+### Drafting hazards
 
 These come from the first repositories to adopt a `REVIEW.md`, where
-the reviewer caught each one on the very pull request that added the
-file.
+each one was caught on the very pull request that added the file.
 
+- **Every rule must be decidable from what the reviewer actually
+  receives.** There is no checkout. The prompt holds the diff, the full
+  text of the *changed* files at head, the guidance files at base, and
+  a **truncated** pull request description — nothing else, and no links
+  are followed. So a rule like "flag a changed call site that has no
+  test covering it" misfires: the test file is unchanged, therefore
+  absent from the prompt, and absent-from-the-prompt is not evidence of
+  absent-from-the-repository. Write rules the diff itself can settle,
+  and say so explicitly where the temptation to infer is strong.
+- **Scope a rule to the code it actually governs.** "Never write to
+  stdout" is right for the process that speaks JSON-RPC on stdout and
+  wrong for the CLI in the same repository whose report *is* its
+  stdout. An unscoped rule turns correct code into a blocking finding,
+  and because the override outranks guidance, the guidance that
+  explained the distinction cannot rescue it.
+- **Check the rationale, not just the rule.** A rule can be right while
+  the sentence justifying it is false — "a crash CI has caught" where
+  the sources only say "can crash", or "X instead of Y" where the code
+  says `X || Y`. Since this file outranks the guidance it was distilled
+  from, an overstated rationale here is the version that wins.
 - **Do not restate what CI already fails on.** The default reporting
   bar already excludes anything a linter, typechecker or test suite
   catches, and re-enabling it only buys a review round trip and no
