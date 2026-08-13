@@ -1356,11 +1356,17 @@ jobs:
               # count cannot tell a clean all-KEEP round from an unreadable
               # one — and comparing that count against the candidate ids is
               # what makes the second visible.
+              # Only ids that are actually CANDIDATES count towards coverage.
+              # A verifier that invents ids (or repeats one) could otherwise
+              # reach the candidate count while leaving real findings
+              # unanswered — the same silent promotion, one step further in.
+              printf '%s\n' "$ids" | tr '[:lower:]' '[:upper:]' | grep . > vids.txt || true
               vconform=$(printf '%s\n' "$verdicts" \
                 | grep -oiE '^[[:space:]]*[A-Za-z0-9]+[[:space:]]*:[[:space:]]*(KEEP|DROP)' \
                 | cut -d: -f1 | tr -d ' \t' \
-                | tr '[:lower:]' '[:upper:]' | sort -u | grep -c . || true)
-              vwanted=$(printf '%s\n' "$ids" | grep -c . || true)
+                | tr '[:lower:]' '[:upper:]' | sort -u \
+                | { grep -Fxf vids.txt || true; } | grep -c . || true)
+              vwanted=$(grep -c . vids.txt || true)
               if [ "${vconform:-0}" -eq 0 ]; then
                 VERIFIER_NOTE="Verifier output was unreadable this round — findings above are unverified."
               elif [ "${vconform:-0}" -lt "${vwanted:-0}" ]; then

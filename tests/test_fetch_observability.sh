@@ -58,10 +58,17 @@ t "label: iconv dropped a byte, cap did not clamp -> still FULL" \
 # Distinct ids carrying a readable verdict — mirrors the engine, which
 # compares this against the candidate id count so a PARTIAL answer is
 # visible too, not only a wholly unreadable one.
-conforming() { # <verdict-text> -> count of distinct ids with a verdict
-  printf '%s\n' "$1" \
+conforming() { # <verdict-text> [<candidate-ids>] -> count of answered candidates
+  printf '%s\n' "${2:-}" | tr '[:lower:]' '[:upper:]' | grep . > /tmp/vids_test.txt || true
+  local ans
+  ans=$(printf '%s\n' "$1" \
     | grep -oiE '^[[:space:]]*[A-Za-z0-9]+[[:space:]]*:[[:space:]]*(KEEP|DROP)' \
-    | cut -d: -f1 | tr -d ' \t' | tr '[:lower:]' '[:upper:]' | sort -u | grep -c . || true
+    | cut -d: -f1 | tr -d ' \t' | tr '[:lower:]' '[:upper:]' | sort -u)
+  if [ -s /tmp/vids_test.txt ]; then
+    printf '%s\n' "$ans" | { grep -Fxf /tmp/vids_test.txt || true; } | grep -c . || true
+  else
+    printf '%s\n' "$ans" | grep -c . || true
+  fi
 }
 
 # note <conform> <wanted> — mirrors the engine's three-way branch.
@@ -77,6 +84,16 @@ t "verifier note: nothing readable -> UNREADABLE" "UNREADABLE" "$(note 0 3)"
 t "verifier note: duplicate verdicts do not inflate coverage" \
   "PARTIAL" "$(note "$(conforming 'R1F1: KEEP - a
 R1F1: DROP - b')" 2)"
+# The verifier answering for ids that were never candidates must not count.
+t "verifier: invented ids do not count towards coverage" \
+  "1" "$(conforming 'R1F1: KEEP - real
+R9F9: DROP - invented
+R8F8: DROP - invented' 'R1F1
+R1F2')"
+t "verifier note: invented ids cannot mask an unanswered candidate" \
+  "PARTIAL" "$(note "$(conforming 'R1F1: KEEP - real
+R9F9: DROP - invented' 'R1F1
+R1F2')" 2)"
 
 t "verifier: all KEEP is readable (0 drops, but verified)" \
   "2" "$(conforming 'R1F1: KEEP - holds up
@@ -139,7 +156,12 @@ t "engine: verifier counts KEEP as well as DROP" "yes" \
   "$(grep -qF '(KEEP|DROP)' "$ENGINE" && echo yes || echo no)"
 
 t "engine: verifier coverage is compared against the candidate ids" "yes" \
-  "$(grep -qF 'vwanted=$(printf' "$ENGINE" && grep -qF '"${vconform:-0}" -lt "${vwanted:-0}"' "$ENGINE" && echo yes || echo no)"
+  "$(grep -qF 'vwanted=$(grep -c . vids.txt' "$ENGINE" && grep -qF '"${vconform:-0}" -lt "${vwanted:-0}"' "$ENGINE" && echo yes || echo no)"
+
+# Coverage must be intersected with the real candidate list, or a verifier
+# inventing ids reaches the candidate count with real findings unanswered.
+t "engine: coverage counts only ids that were actually candidates" "yes" \
+  "$(grep -qF 'grep -Fxf vids.txt' "$ENGINE" && echo yes || echo no)"
 
 t "engine: a partial verifier answer sets its own note" "yes" \
   "$(grep -qF 'Verifier answered for ${vconform} of ${vwanted} findings' "$ENGINE" && echo yes || echo no)"
