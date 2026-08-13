@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.1](https://github.com/shigechika/ai-review/compare/v1.5.0...v1.5.1) (2026-08-13)
+
+
+### Bug Fixes
+
+* distinguish fetch failure from absence, and unreadable verdicts from clean ones ([#56](https://github.com/shigechika/ai-review/issues/56)) ([0f11e92](https://github.com/shigechika/ai-review/commit/0f11e9237d0cb4dbe42a1bb6ae94ff87686b1e4e))
+
 ## [1.5.0](https://github.com/shigechika/ai-review/compare/v1.4.3...v1.5.0) (2026-08-10)
 
 
