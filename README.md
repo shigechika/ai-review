@@ -216,6 +216,88 @@ plumbing: set the variable on the repo and every review there picks it up.
 If the deployment rejects `reasoning_effort` with HTTP 400, the engine
 retries once without the parameter and says so in the log.
 
+## Writing a `REVIEW.md`
+
+A `REVIEW.md` at the root of a calling repository overrides the
+reviewer's default focus and severity calibration for that repository.
+It is optional — absent, nothing changes.
+
+### What it is for
+
+The engine already reads `CLAUDE.md`, `AGENTS.md` and
+`.github/copilot-instructions.md` as *guidance*: background the model
+weighs. `REVIEW.md` differs in three specific ways, and those three are
+the only reasons to add one.
+
+1. **Severity.** Guidance cannot declare a class of defect blocking.
+   The default calibration reserves `blocking` for behavior that is
+   wrong in normal operation and sends the rest to `advisory`. A
+   repository where, say, a credential reaching a log line is
+   categorically blocking can only say so here.
+2. **Additive checks.** The default focus paragraphs — documentation
+   mode especially — contain a *closed* "Do NOT report" list. A check
+   falling inside that list can only be re-enabled here, because
+   nothing in the default focus conflicts with an addition: an override
+   that merely won where it conflicts would be a no-op for it.
+3. **Binding suppression.** "Not worth reporting here" is a hint when
+   it sits in guidance. The same sentence in `REVIEW.md` takes
+   precedence over the default focus.
+
+If what you want to say needs none of those three, it belongs in
+`CLAUDE.md` or `.github/copilot-instructions.md` instead.
+
+### Shape
+
+Three sections, in this order:
+
+```markdown
+# Review rules for this repository
+
+## Always blocking
+- ...
+
+## Report even though the default focus would not
+- ...
+
+## Never report
+- ...
+```
+
+### Keep it short, and do not restate the rationale
+
+`REVIEW.md` is capped at 8 KiB, deliberately smaller than the 48 KiB
+per-file guidance cap: it is a rule list, not a second guidance
+document, and a long override sitting ahead of the default focus
+dilutes the priority it exists to carry. This repository's own
+`REVIEW.md` is about 2.7 KB — that ratio is the target, not the
+exception.
+
+State the rule and its severity; leave the *why* in `CLAUDE.md` or
+`.github/copilot-instructions.md`, which the reviewer also receives.
+Because the override wins by design, a duplicated explanation is worse
+than redundant: a stale sentence here would out-rank a corrected one in
+guidance indefinitely.
+
+### What it cannot change
+
+The output format is fixed. Finding markers, the `blocking`/`advisory`
+severity values and the findings ledger stay as they are no matter what
+a repository writes, because other tooling parses them. `REVIEW.md`
+changes *what* is reported and *how severely*, never *how the report is
+written*.
+
+### When it takes effect
+
+Like the other guidance files, `REVIEW.md` is read at the **base**
+revision, so a pull request cannot rewrite the rules it is reviewed
+against. The pull request that adds or edits `REVIEW.md` is therefore
+still reviewed under the previous rules, and the change applies from the
+next pull request onward.
+
+To confirm it is being read, look for `::notice::REVIEW.md: sent N of M
+bytes` and a non-zero `review_override=` in the context line of the
+`review` job log.
+
 ## Security model
 
 Read the header comment of
