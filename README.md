@@ -284,14 +284,18 @@ These come from the first repositories to adopt a `REVIEW.md`, where
 each one was caught on the very pull request that added the file.
 
 - **Every rule must be decidable from what the reviewer actually
-  receives.** There is no checkout. The prompt holds the diff, the full
-  text of the *changed* files at head, the guidance files at base, and
-  a **truncated** pull request description — nothing else, and no links
-  are followed. So a rule like "flag a changed call site that has no
-  test covering it" misfires: the test file is unchanged, therefore
-  absent from the prompt, and absent-from-the-prompt is not evidence of
-  absent-from-the-repository. Write rules the diff itself can settle,
-  and say so explicitly where the temptation to infer is strong.
+  receives.** There is no checkout, and no link is ever followed. The
+  prompt holds the diff, the *changed* files at head — only as many as
+  the count and byte caps above allow, with deny-listed ones dropped
+  entirely — the guidance files and `REVIEW.md` at base, and a
+  **truncated** pull request description. (Documentation-only pull
+  requests additionally get unchanged sources the documentation
+  cites.) So a rule like "flag a changed call site that has no test
+  covering it" misfires: the test file is unchanged, therefore absent
+  from the prompt, and absent-from-the-prompt is never evidence of
+  absent-from-the-repository — the caps mean even a *changed* file can
+  be missing. Write rules the diff itself can settle, and say so
+  explicitly where the temptation to infer is strong.
 - **Scope a rule to the code it actually governs.** "Never write to
   stdout" is right for the process that speaks JSON-RPC on stdout and
   wrong for the CLI in the same repository whose report *is* its
