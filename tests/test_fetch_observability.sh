@@ -43,32 +43,42 @@ t "fetch: success is neither" \
 # ---------- TRUNCATED is decided by the cap, not by iconv ----------
 # total = size the API reported, clamped = bytes after head -c, sent = bytes
 # after iconv -c. Only clamped < total means the CAP cut the file.
-label() { # <total> <clamped>
+# Takes `sent` as well, even though the correct rule ignores it, so the OLD
+# buggy basis is expressible here: a mirror that only ever saw `clamped`
+# could not distinguish the two rules, and reverting the engine to `sent`
+# would leave every assertion green.
+label() { # <total> <clamped> <sent>
   if [ "$2" -lt "$1" ]; then printf 'TRUNCATED'; else printf 'FULL'; fi
 }
+label_old_buggy() { # the pre-fix rule, kept only to prove the cases differ
+  if [ "$3" -lt "$1" ]; then printf 'TRUNCATED'; else printf 'FULL'; fi
+}
 
-t "label: under the cap, clean UTF-8 -> FULL" "FULL"      "$(label 1000 1000)"
-t "label: cap actually clamped -> TRUNCATED"  "TRUNCATED" "$(label 9000 8192)"
+t "label: under the cap, clean UTF-8 -> FULL" "FULL"      "$(label 1000 1000 1000)"
+t "label: cap actually clamped -> TRUNCATED"  "TRUNCATED" "$(label 9000 8192 8192)"
 # The regression this exists for: iconv drops a stray invalid byte from a file
-# that the cap never touched. sent would be 999 while clamped stays 1000.
-t "label: iconv dropped a byte, cap did not clamp -> still FULL" \
-  "FULL" "$(label 1000 1000)"
+# the cap never touched. clamped stays 1000 while sent falls to 999.
+t "label: iconv dropped a byte, cap did not clamp -> FULL" \
+  "FULL" "$(label 1000 1000 999)"
+# ...and the same input under the old rule, to prove the two disagree. If this
+# ever stops being TRUNCATED the case above has gone vacuous.
+t "label: that same input WAS mislabelled by the old sent-based rule" \
+  "TRUNCATED" "$(label_old_buggy 1000 1000 999)"
 
 # ---------- verifier: unreadable output is not "nothing to drop" ----------
 # Distinct ids carrying a readable verdict — mirrors the engine, which
 # compares this against the candidate id count so a PARTIAL answer is
 # visible too, not only a wholly unreadable one.
-conforming() { # <verdict-text> [<candidate-ids>] -> count of answered candidates
-  printf '%s\n' "${2:-}" | tr '[:lower:]' '[:upper:]' | grep . > /tmp/vids_test.txt || true
-  local ans
-  ans=$(printf '%s\n' "$1" \
+# No "no candidate ids" fallback: the engine ALWAYS pipes through
+# `grep -Fxf vids.txt`, and an empty pattern file matches nothing. A mirror
+# that counted everything in that case would assert numbers the engine can
+# never produce.
+conforming() { # <verdict-text> <candidate-ids> -> count of answered candidates
+  printf '%s\n' "$2" | tr '[:lower:]' '[:upper:]' | grep . > /tmp/vids_test.txt || true
+  printf '%s\n' "$1" \
     | grep -oiE '^[[:space:]]*[A-Za-z0-9]+[[:space:]]*:[[:space:]]*(KEEP|DROP)' \
-    | cut -d: -f1 | tr -d ' \t' | tr '[:lower:]' '[:upper:]' | sort -u)
-  if [ -s /tmp/vids_test.txt ]; then
-    printf '%s\n' "$ans" | { grep -Fxf /tmp/vids_test.txt || true; } | grep -c . || true
-  else
-    printf '%s\n' "$ans" | grep -c . || true
-  fi
+    | cut -d: -f1 | tr -d ' \t' | tr '[:lower:]' '[:upper:]' | sort -u \
+    | { grep -Fxf /tmp/vids_test.txt || true; } | grep -c . || true
 }
 
 # note <conform> <wanted> — mirrors the engine's three-way branch.
@@ -83,13 +93,25 @@ t "verifier note: partial coverage -> PARTIAL"   "PARTIAL"    "$(note 1 3)"
 t "verifier note: nothing readable -> UNREADABLE" "UNREADABLE" "$(note 0 3)"
 t "verifier note: duplicate verdicts do not inflate coverage" \
   "PARTIAL" "$(note "$(conforming 'R1F1: KEEP - a
-R1F1: DROP - b')" 2)"
+R1F1: DROP - b' 'R1F1
+R1F2')" 2)"
 # The verifier answering for ids that were never candidates must not count.
 t "verifier: invented ids do not count towards coverage" \
   "1" "$(conforming 'R1F1: KEEP - real
 R9F9: DROP - invented
 R8F8: DROP - invented' 'R1F1
 R1F2')"
+# Both sides deduplicate, so a model emitting the same id twice must not
+# look permanently under-answered.
+wanted() { printf '%s\n' "$1" | tr '[:lower:]' '[:upper:]' | grep . | sort -u | grep -c . || true; }
+t "verifier note: a duplicated CANDIDATE id does not inflate the target" \
+  "NONE" "$(note "$(conforming 'R1F1: KEEP - a
+R1F2: KEEP - b' 'R1F1
+R1F1
+R1F2')" "$(wanted 'R1F1
+R1F1
+R1F2')")"
+
 t "verifier note: invented ids cannot mask an unanswered candidate" \
   "PARTIAL" "$(note "$(conforming 'R1F1: KEEP - real
 R9F9: DROP - invented' 'R1F1
@@ -97,18 +119,20 @@ R1F2')" 2)"
 
 t "verifier: all KEEP is readable (0 drops, but verified)" \
   "2" "$(conforming 'R1F1: KEEP - holds up
-R1F2: KEEP - holds up')"
+R1F2: KEEP - holds up' 'R1F1
+R1F2')"
 t "verifier: mixed verdicts are readable" \
   "2" "$(conforming 'R1F1: DROP - refuted by line 12
-R1F2: KEEP - stands')"
+R1F2: KEEP - stands' 'R1F1
+R1F2')"
 t "verifier: indented verdicts still readable" \
-  "1" "$(conforming '   R1F1: DROP - refuted')"
+  "1" "$(conforming '   R1F1: DROP - refuted' 'R1F1')"
 t "verifier: lowercase still readable" \
-  "1" "$(conforming 'r1f1: keep - fine')"
+  "1" "$(conforming 'r1f1: keep - fine' 'R1F1')"
 t "verifier: prose answer is NOT readable" \
-  "0" "$(conforming 'I reviewed the findings and they all look reasonable to me.')"
+  "0" "$(conforming 'I reviewed the findings and they all look reasonable to me.' 'R1F1')"
 t "verifier: markdown-wrapped verdicts are NOT readable" \
-  "0" "$(conforming '- **R1F1**: DROP - refuted')"
+  "0" "$(conforming '- **R1F1**: DROP - refuted' 'R1F1')"
 
 # ---------- structural checks against the real engine ----------
 t "engine: guidance fetch captures gh exit status separately" "yes" \
@@ -156,7 +180,12 @@ t "engine: verifier counts KEEP as well as DROP" "yes" \
   "$(grep -qF '(KEEP|DROP)' "$ENGINE" && echo yes || echo no)"
 
 t "engine: verifier coverage is compared against the candidate ids" "yes" \
-  "$(grep -qF 'vwanted=$(grep -c . vids.txt' "$ENGINE" && grep -qF '"${vconform:-0}" -lt "${vwanted:-0}"' "$ENGINE" && echo yes || echo no)"
+  "$(grep -qF 'vwanted=$(sort -u vids.txt' "$ENGINE" && grep -qF '"${vconform:-0}" -lt "${vwanted:-0}"' "$ENGINE" && echo yes || echo no)"
+
+# Both sides must deduplicate or a repeated candidate id is permanently
+# under-answered — a false alarm on the very signal this file exists to pin.
+t "engine: the candidate count deduplicates, matching vconform's sort -u" "yes" \
+  "$(grep -qF 'sort -u vids.txt' "$ENGINE" && echo yes || echo no)"
 
 # Coverage must be intersected with the real candidate list, or a verifier
 # inventing ids reaches the candidate count with real findings unanswered.

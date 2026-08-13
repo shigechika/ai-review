@@ -210,11 +210,24 @@ set — see "pr-gate.yml invariants" below.
   warns. Never interpolate the captured stderr into the warning — it is
   untrusted for workflow-command purposes, the same class as model
   output.
-- An unreadable verifier response is not "nothing to drop". The
-  conformance count matches `KEEP` as well as `DROP`, because a
-  DROP-only count cannot tell a clean all-KEEP round apart from a
-  response this engine could not parse — and the latter silently
-  promoted every candidate to "verified".
+- An unreadable or PARTIAL verifier response is not "nothing to drop".
+  Three pieces, each closing a hole the previous one left, all found by
+  this engine reviewing its own fix:
+  1. The conformance count matches `KEEP` as well as `DROP` — a
+     DROP-only count cannot tell a clean all-KEEP round apart from a
+     response this engine could not parse.
+  2. That count is compared against the candidate count, so an answer
+     covering only some findings is reported instead of silently
+     promoting the rest to "verified".
+  3. It counts only ids that were actually candidates
+     (`grep -Fxf vids.txt`) — without the intersection a verifier
+     inventing ids reaches the candidate count while real findings go
+     unanswered. **Deleting that intersection reads as a harmless
+     simplification and is not; it reopens the hole.**
+  Both sides deduplicate (`sort -u`). Counting duplicate candidate ids
+  on one side only made a model that emitted the same id twice look
+  permanently under-answered — a false alarm on the very signal this
+  exists to raise.
 - Delta mode requires a strictly-`ahead` compare; docs-only skip sits
   behind the same guard. Do not move either in front of it.
 - User-facing strings that other code greps for (`No findings clear the

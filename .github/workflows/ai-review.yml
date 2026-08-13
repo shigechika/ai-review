@@ -1366,7 +1366,10 @@ jobs:
                 | cut -d: -f1 | tr -d ' \t' \
                 | tr '[:lower:]' '[:upper:]' | sort -u \
                 | { grep -Fxf vids.txt || true; } | grep -c . || true)
-              vwanted=$(grep -c . vids.txt || true)
+              # Deduplicated on BOTH sides: vconform is sort -u, so counting
+              # duplicate candidate ids here would make a model that emitted
+              # the same id twice look permanently under-answered.
+              vwanted=$(sort -u vids.txt | grep -c . || true)
               if [ "${vconform:-0}" -eq 0 ]; then
                 VERIFIER_NOTE="Verifier output was unreadable this round — findings above are unverified."
               elif [ "${vconform:-0}" -lt "${vwanted:-0}" ]; then
