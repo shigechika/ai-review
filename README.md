@@ -216,6 +216,141 @@ plumbing: set the variable on the repo and every review there picks it up.
 If the deployment rejects `reasoning_effort` with HTTP 400, the engine
 retries once without the parameter and says so in the log.
 
+## Writing a `REVIEW.md`
+
+A `REVIEW.md` at the root of a calling repository overrides the
+reviewer's default focus and severity calibration for that repository.
+It is optional — absent, nothing changes.
+
+### What it is for
+
+The engine already reads `CLAUDE.md`, `AGENTS.md` and
+`.github/copilot-instructions.md` as *guidance*: background the model
+weighs. `REVIEW.md` differs in three specific ways, and those three are
+the only reasons to add one.
+
+1. **Severity.** Guidance cannot declare a class of defect blocking.
+   The default calibration reserves `blocking` for behavior that is
+   wrong in normal operation and sends the rest to `advisory`. A
+   repository where, say, a credential reaching a log line is
+   categorically blocking can only say so here.
+2. **Additive checks.** The default focus paragraphs — documentation
+   mode especially — contain a *closed* "Do NOT report" list. A check
+   falling inside that list can only be re-enabled here, because
+   nothing in the default focus conflicts with an addition: an override
+   that merely won where it conflicts would be a no-op for it.
+3. **Binding suppression.** "Not worth reporting here" is a hint when
+   it sits in guidance. The same sentence in `REVIEW.md` takes
+   precedence over the default focus.
+
+If what you want to say needs none of those three, it belongs in
+`CLAUDE.md` or `.github/copilot-instructions.md` instead.
+
+### Shape
+
+Three sections, in this order:
+
+```markdown
+# Review rules for this repository
+
+## Always blocking
+- ...
+
+## Report even though the default focus would not
+- ...
+
+## Never report
+- ...
+```
+
+### Keep it short, and do not restate the rationale
+
+`REVIEW.md` is capped at 8 KiB, deliberately smaller than the 48 KiB
+per-file guidance cap: it is a rule list, not a second guidance
+document, and a long override sitting ahead of the default focus
+dilutes the priority it exists to carry. This repository's own
+`REVIEW.md` is about 2.7 KB — that ratio is the target, not the
+exception.
+
+State the rule and its severity; leave the *why* in `CLAUDE.md` or
+`.github/copilot-instructions.md`, which the reviewer also receives.
+Because the override wins by design, a duplicated explanation is worse
+than redundant: a stale sentence here would out-rank a corrected one in
+guidance indefinitely.
+
+### Drafting hazards
+
+These come from the first repositories to adopt a `REVIEW.md`, where
+each one was caught on the very pull request that added the file.
+
+- **Every rule must be decidable from what the reviewer actually
+  receives.** There is no checkout, and no link is ever followed. The
+  prompt holds the diff, the *changed* files at head — only as many as
+  the count and byte caps above allow, with deny-listed ones dropped
+  entirely — the guidance files and `REVIEW.md` at base, and a
+  **truncated** pull request description. (Documentation-only pull
+  requests additionally get unchanged sources the documentation
+  cites.) So a rule like "flag a changed call site that has no test
+  covering it" misfires: the test file is unchanged, therefore absent
+  from the prompt, and absent-from-the-prompt is never evidence of
+  absent-from-the-repository — the caps mean even a *changed* file can
+  be missing. Write rules the diff itself can settle, and say so
+  explicitly where the temptation to infer is strong.
+- **Scope a rule to the code it actually governs.** "Never write to
+  stdout" is right for the process that speaks JSON-RPC on stdout and
+  wrong for the CLI in the same repository whose report *is* its
+  stdout. An unscoped rule turns correct code into a blocking finding,
+  and because the override outranks guidance, the guidance that
+  explained the distinction cannot rescue it.
+- **Check the rationale, not just the rule.** A rule can be right while
+  the sentence justifying it is false — "a crash CI has caught" where
+  the sources only say "can crash", or "X instead of Y" where the code
+  says `X || Y`. Since this file outranks the guidance it was distilled
+  from, an overstated rationale here is the version that wins.
+- **Do not restate what CI already fails on.** The default reporting
+  bar already excludes anything a linter, typechecker or test suite
+  catches, and re-enabling it only buys a review round trip and no
+  information. If a rule you are about to write is already a build
+  failure, it belongs under **Never report**, not above it.
+- **A "Never report" entry must be unconditional.** Any "but do report
+  X" attached to one reads as a contradiction rather than a
+  refinement — the reviewer is told to stay silent and to comment about
+  the same situation. Put the reportable half in the section above, or
+  narrow the entry until the exception disappears.
+- **Describe all three sections accurately at the top.** A `REVIEW.md`
+  does three things — marks findings blocking, *widens* scope to
+  classes the default focus skips, and suppresses noise — and an
+  opening line that claims fewer is contradicted by the file's own
+  contents. "Severity only" is the tempting and wrong summary: the
+  middle section changes *what gets examined*, not just how harshly it
+  is graded. The reviewer will say so.
+- **A blanket suppression can silently cancel a rule above it.** "Never
+  report anything CI already fails on" reads as reasonable until a
+  blocking rule turns out to be CI-enforced too — a committed secret,
+  say — at which point the two entries contradict each other and the
+  more specific one loses. Name the specific case you mean, and carve
+  out anything above that the wording would otherwise swallow.
+
+### What it cannot change
+
+The output format is fixed. Finding markers, the `blocking`/`advisory`
+severity values and the findings ledger stay as they are no matter what
+a repository writes, because other tooling parses them. `REVIEW.md`
+changes *what* is reported and *how severely*, never *how the report is
+written*.
+
+### When it takes effect
+
+Like the other guidance files, `REVIEW.md` is read at the **base**
+revision, so a pull request cannot rewrite the rules it is reviewed
+against. The pull request that adds or edits `REVIEW.md` is therefore
+still reviewed under the previous rules, and the change applies from the
+next pull request onward.
+
+To confirm it is being read, look for `::notice::REVIEW.md: sent N of M
+bytes` and a non-zero `review_override=` in the context line of the
+`review` job log.
+
 ## Security model
 
 Read the header comment of
