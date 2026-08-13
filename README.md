@@ -278,6 +278,27 @@ Because the override wins by design, a duplicated explanation is worse
 than redundant: a stale sentence here would out-rank a corrected one in
 guidance indefinitely.
 
+### Three drafting hazards
+
+These come from the first repositories to adopt a `REVIEW.md`, where
+the reviewer caught each one on the very pull request that added the
+file.
+
+- **Do not restate what CI already fails on.** The default reporting
+  bar already excludes anything a linter, typechecker or test suite
+  catches, and re-enabling it only buys a review round trip and no
+  information. If a rule you are about to write is already a build
+  failure, it belongs under **Never report**, not above it.
+- **A "Never report" entry must be unconditional.** Any "but do report
+  X" attached to one reads as a contradiction rather than a
+  refinement — the reviewer is told to stay silent and to comment about
+  the same situation. Put the reportable half in the section above, or
+  narrow the entry until the exception disappears.
+- **Describe all three sections accurately at the top.** A file that
+  opens "this only says what is blocking and what is noise" while its
+  middle section assigns advisory severity is contradicted by its own
+  contents, and the reviewer will say so.
+
 ### What it cannot change
 
 The output format is fixed. Finding markers, the `blocking`/`advisory`
