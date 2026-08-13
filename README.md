@@ -324,12 +324,18 @@ each one was caught on the very pull request that added the file.
   contents. "Severity only" is the tempting and wrong summary: the
   middle section changes *what gets examined*, not just how harshly it
   is graded. The reviewer will say so.
-- **A blanket suppression can silently cancel a rule above it.** "Never
-  report anything CI already fails on" reads as reasonable until a
-  blocking rule turns out to be CI-enforced too — a committed secret,
-  say — at which point the two entries contradict each other and the
-  more specific one loses. Name the specific case you mean, and carve
-  out anything above that the wording would otherwise swallow.
+- **A blanket suppression can silently cancel a rule above it.** This
+  is the single most repeated mistake so far, caught twice on separate
+  repositories. "Never report anything CI already fails on" reads as
+  reasonable until a blocking rule turns out to be CI-enforced too — a
+  committed secret caught by a test, or a credential logged in a diff
+  that also adds a failing test — at which point the two entries
+  contradict each other and the more specific one loses. Enumerate the
+  specific gates you mean rather than writing "anything", and state
+  explicitly that the suppression never applies to a rule in the
+  blocking section. Before shipping a `REVIEW.md`, read each **Never
+  report** entry back against every **Always blocking** entry and ask
+  whether the wording could swallow it.
 
 ### What it cannot change
 
