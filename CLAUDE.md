@@ -197,7 +197,24 @@ set — see "pr-gate.yml invariants" below.
 - Byte caps are named in one block ("Byte caps") — change budgets there,
   and keep the header comment's arithmetic in sync.
 - Truncation must be labelled: a clamped attachment gets the `TRUNCATED`
-  header, never a "full content" label.
+  header, never a "full content" label. The label is decided on what the
+  CAP actually clamped, not on the final byte count — `head -c` and
+  `iconv -c` are deliberately separate steps for that reason. Folded
+  together, one stray non-UTF-8 byte in an under-cap file made
+  `sent < total` and mislabelled it TRUNCATED, which is the same
+  invariant failing in the other direction.
+- A fetch that FAILS and a file that is genuinely ABSENT must not look
+  alike. `gh api`'s exit status is captured separately from its output
+  (`... 2>gerr.txt) || gstatus=$?`), a 404 stays silent because most
+  repositories legitimately lack most guidance files, and anything else
+  warns. Never interpolate the captured stderr into the warning — it is
+  untrusted for workflow-command purposes, the same class as model
+  output.
+- An unreadable verifier response is not "nothing to drop". The
+  conformance count matches `KEEP` as well as `DROP`, because a
+  DROP-only count cannot tell a clean all-KEEP round apart from a
+  response this engine could not parse — and the latter silently
+  promoted every candidate to "verified".
 - Delta mode requires a strictly-`ahead` compare; docs-only skip sits
   behind the same guard. Do not move either in front of it.
 - User-facing strings that other code greps for (`No findings clear the
