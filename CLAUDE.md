@@ -256,6 +256,28 @@ set — see "pr-gate.yml invariants" below.
   "deliberate" design choice that got reversed, a stale pass-count) can
   silently go stale while later sections describe the corrected
   version.
+- A hand-written MIRROR of engine logic must be able to express the
+  WRONG implementation, or the assertions built on it are vacuous. Two
+  shapes, both found by `/code-review` on PR #56 after the tests had
+  already passed and been mutation-tested:
+  - **A parameter the correct rule ignores is still needed.** The
+    TRUNCATED mirror took `(total, clamped)` because the fixed rule
+    compares those two — so no input could express the old
+    `sent`-based rule, the "iconv dropped a byte" case was
+    byte-identical to the case above it, and reverting the engine left
+    every assertion green. The fix is to take `sent` as well and keep
+    a `label_old_buggy()` beside it asserting the two rules DISAGREE
+    on that input; if they ever agree, the case has gone vacuous.
+  - **A convenience the engine does not have.** The verifier-coverage
+    mirror had a "no candidate ids given, count everything" fallback;
+    the engine always pipes through `grep -Fxf vids.txt`, where an
+    empty pattern file matches nothing. Four assertions were pinning
+    numbers the engine can never produce.
+  Prefer `extract_run` / `extract_between` over a mirror wherever the
+  shape allows (see `test_deny_list.sh`). Where a mirror is
+  unavoidable, ask what input would distinguish it from the bug it is
+  meant to catch — and if none exists, the mirror is the wrong shape,
+  not merely thin.
 - A NEGATIVE structural check built on `awk '/start/,/end/' | grep -qF X`
   (isolate a code span, then assert it does NOT contain X) has a
   vacuous-pass failure mode: if the start anchor stops matching the
