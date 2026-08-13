@@ -294,10 +294,19 @@ file.
   refinement — the reviewer is told to stay silent and to comment about
   the same situation. Put the reportable half in the section above, or
   narrow the entry until the exception disappears.
-- **Describe all three sections accurately at the top.** A file that
-  opens "this only says what is blocking and what is noise" while its
-  middle section assigns advisory severity is contradicted by its own
-  contents, and the reviewer will say so.
+- **Describe all three sections accurately at the top.** A `REVIEW.md`
+  does three things — marks findings blocking, *widens* scope to
+  classes the default focus skips, and suppresses noise — and an
+  opening line that claims fewer is contradicted by the file's own
+  contents. "Severity only" is the tempting and wrong summary: the
+  middle section changes *what gets examined*, not just how harshly it
+  is graded. The reviewer will say so.
+- **A blanket suppression can silently cancel a rule above it.** "Never
+  report anything CI already fails on" reads as reasonable until a
+  blocking rule turns out to be CI-enforced too — a committed secret,
+  say — at which point the two entries contradict each other and the
+  more specific one loses. Name the specific case you mean, and carve
+  out anything above that the wording would otherwise swallow.
 
 ### What it cannot change
 
