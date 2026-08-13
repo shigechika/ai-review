@@ -591,12 +591,36 @@ jobs:
             [ "$gremain" -gt 0 ] || continue
             gcap=$GUIDANCE_CAP
             [ "$gcap" -le "$gremain" ] || gcap=$gremain
+            # gh exit status is captured separately from the output so a
+            # transient failure (rate limit, 5xx, network) can be told apart
+            # from the file genuinely not existing. Both used to look like
+            # an empty $meta, which meant a lost guidance file reviewed as
+            # "this repo has no guidance" with nothing in the log to say so.
+            # `|| gstatus=$?` also keeps errexit from firing here, the same
+            # job the old `|| true` did.
+            gstatus=0
             meta=$(gh api "repos/$GH_REPO/contents/$f?ref=$BASE_SHA" \
-                     --jq 'select(.type=="file" and .encoding=="base64") | "\(.size)\t\(.content)"' 2>/dev/null || true)
+                     --jq 'select(.type=="file" and .encoding=="base64") | "\(.size)\t\(.content)"' 2>gerr.txt) || gstatus=$?
+            if [ "$gstatus" -ne 0 ]; then
+              # A 404 is the common, expected case: most repositories do not
+              # have all three files. Anything else is a real failure worth
+              # a warning. The error text is NEVER echoed — it is untrusted
+              # for workflow-command purposes; only the classification is.
+              if ! grep -q "HTTP 404" gerr.txt; then
+                echo "::warning::guidance $f: fetch failed — reviewing without it this round"
+              fi
+              continue
+            fi
             [ -n "$meta" ] || continue
             total=${meta%%$'\t'*}
+            # head -c and iconv are split so the TRUNCATED label can be
+            # decided on what the CAP actually clamped. Folded together,
+            # a single stray non-UTF-8 byte anywhere in an under-cap file
+            # made sent < total and mislabelled it TRUNCATED.
             printf '%s' "${meta#*$'\t'}" | tr -d '\n' | base64 -d 2>/dev/null \
-              | head -c "$gcap" | iconv -f UTF-8 -t UTF-8 -c 2>/dev/null > gbody.txt || true
+              | head -c "$gcap" > graw.txt || true
+            gclamped=$(wc -c < graw.txt | tr -d ' ')
+            iconv -f UTF-8 -t UTF-8 -c < graw.txt > gbody.txt 2>/dev/null || true
             [ -s gbody.txt ] || continue
             # Byte count via wc -c, not ${#body}: that counts CHARACTERS,
             # which for CJK guidance understates the real size (a measured
@@ -610,7 +634,7 @@ jobs:
             # only the Actions log; without this header the model reads a
             # guidance file that stops mid-rule as if that were the whole
             # policy.
-            if [ "$sent" -lt "$total" ]; then
+            if [ "$gclamped" -lt "$total" ]; then
               ghead="=== Repository guidance (TRUNCATED — first ${sent} of ${total} bytes): $f ==="
             else
               ghead="=== Repository guidance: $f ==="
@@ -646,16 +670,27 @@ jobs:
           # generous for a rules list; a caller that needs more is a signal
           # the content belongs in CLAUDE.md instead.
           : > review_override.txt
+          # Same failure-vs-absence split as the guidance loop above, and
+          # for a sharper reason: losing this file silently reverts the
+          # repository to the DEFAULT focus and severity calibration for
+          # that round, with nothing in the log to say the override was
+          # dropped.
+          rstatus=0
           rmeta=$(gh api "repos/$GH_REPO/contents/REVIEW.md?ref=$BASE_SHA" \
-                   --jq 'select(.type=="file" and .encoding=="base64") | "\(.size)\t\(.content)"' 2>/dev/null || true)
-          if [ -n "$rmeta" ]; then
+                   --jq 'select(.type=="file" and .encoding=="base64") | "\(.size)\t\(.content)"' 2>rerr.txt) || rstatus=$?
+          if [ "$rstatus" -ne 0 ] && ! grep -q "HTTP 404" rerr.txt; then
+            echo "::warning::REVIEW.md: fetch failed — reviewing without the repository override this round"
+          fi
+          if [ "$rstatus" -eq 0 ] && [ -n "$rmeta" ]; then
             rtotal=${rmeta%%$'\t'*}
             printf '%s' "${rmeta#*$'\t'}" | tr -d '\n' | base64 -d 2>/dev/null \
-              | head -c "$REVIEW_OVERRIDE_CAP" | iconv -f UTF-8 -t UTF-8 -c 2>/dev/null > rbody.txt || true
+              | head -c "$REVIEW_OVERRIDE_CAP" > rraw.txt || true
+            rclamped=$(wc -c < rraw.txt | tr -d ' ')
+            iconv -f UTF-8 -t UTF-8 -c < rraw.txt > rbody.txt 2>/dev/null || true
             if [ -s rbody.txt ]; then
               rsent=$(wc -c < rbody.txt | tr -d ' ')
               echo "::notice::REVIEW.md: sent ${rsent} of ${rtotal} bytes"
-              if [ "$rsent" -lt "$rtotal" ]; then
+              if [ "$rclamped" -lt "$rtotal" ]; then
                 rhead="=== Repository review override (TRUNCATED — first ${rsent} of ${rtotal} bytes): REVIEW.md ==="
               else
                 rhead="=== Repository review override: REVIEW.md ==="
@@ -1312,6 +1347,34 @@ jobs:
                 | grep -oiE '^[[:space:]]*[A-Za-z0-9]+[[:space:]]*:[[:space:]]*DROP' \
                 | cut -d: -f1 | tr -d ' \t' \
                 | tr '[:lower:]' '[:upper:]' | paste -sd, - || true)
+              # A response that does not carry a readable verdict for EVERY
+              # candidate is not the same as "nothing to drop". Two shapes
+              # hide there: an answer in prose (or a shape this extraction
+              # cannot read), and a partial answer that covers some ids and
+              # silently leaves the rest looking verified. Counting KEEP as
+              # well as DROP is what makes the first visible — a DROP-only
+              # count cannot tell a clean all-KEEP round from an unreadable
+              # one — and comparing that count against the candidate ids is
+              # what makes the second visible.
+              # Only ids that are actually CANDIDATES count towards coverage.
+              # A verifier that invents ids (or repeats one) could otherwise
+              # reach the candidate count while leaving real findings
+              # unanswered — the same silent promotion, one step further in.
+              printf '%s\n' "$ids" | tr '[:lower:]' '[:upper:]' | grep . > vids.txt || true
+              vconform=$(printf '%s\n' "$verdicts" \
+                | grep -oiE '^[[:space:]]*[A-Za-z0-9]+[[:space:]]*:[[:space:]]*(KEEP|DROP)' \
+                | cut -d: -f1 | tr -d ' \t' \
+                | tr '[:lower:]' '[:upper:]' | sort -u \
+                | { grep -Fxf vids.txt || true; } | grep -c . || true)
+              # Deduplicated on BOTH sides: vconform is sort -u, so counting
+              # duplicate candidate ids here would make a model that emitted
+              # the same id twice look permanently under-answered.
+              vwanted=$(sort -u vids.txt | grep -c . || true)
+              if [ "${vconform:-0}" -eq 0 ]; then
+                VERIFIER_NOTE="Verifier output was unreadable this round — findings above are unverified."
+              elif [ "${vconform:-0}" -lt "${vwanted:-0}" ]; then
+                VERIFIER_NOTE="Verifier answered for ${vconform} of ${vwanted} findings this round — the rest are unverified."
+              fi
             else
               VERIFIER_NOTE="Verifier pass unavailable this round — findings above are unverified."
             fi
