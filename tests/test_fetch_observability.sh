@@ -55,9 +55,28 @@ t "label: iconv dropped a byte, cap did not clamp -> still FULL" \
   "FULL" "$(label 1000 1000)"
 
 # ---------- verifier: unreadable output is not "nothing to drop" ----------
-conforming() { # <verdict-text> -> count of readable verdict lines
-  printf '%s\n' "$1" | grep -ciE '^[[:space:]]*[A-Za-z0-9]+[[:space:]]*:[[:space:]]*(KEEP|DROP)' || true
+# Distinct ids carrying a readable verdict — mirrors the engine, which
+# compares this against the candidate id count so a PARTIAL answer is
+# visible too, not only a wholly unreadable one.
+conforming() { # <verdict-text> -> count of distinct ids with a verdict
+  printf '%s\n' "$1" \
+    | grep -oiE '^[[:space:]]*[A-Za-z0-9]+[[:space:]]*:[[:space:]]*(KEEP|DROP)' \
+    | cut -d: -f1 | tr -d ' \t' | tr '[:lower:]' '[:upper:]' | sort -u | grep -c . || true
 }
+
+# note <conform> <wanted> — mirrors the engine's three-way branch.
+note() {
+  if [ "$1" -eq 0 ]; then printf 'UNREADABLE'
+  elif [ "$1" -lt "$2" ]; then printf 'PARTIAL'
+  else printf 'NONE'; fi
+}
+
+t "verifier note: full coverage -> no note"      "NONE"       "$(note 3 3)"
+t "verifier note: partial coverage -> PARTIAL"   "PARTIAL"    "$(note 1 3)"
+t "verifier note: nothing readable -> UNREADABLE" "UNREADABLE" "$(note 0 3)"
+t "verifier note: duplicate verdicts do not inflate coverage" \
+  "PARTIAL" "$(note "$(conforming 'R1F1: KEEP - a
+R1F1: DROP - b')" 2)"
 
 t "verifier: all KEEP is readable (0 drops, but verified)" \
   "2" "$(conforming 'R1F1: KEEP - holds up
@@ -117,7 +136,13 @@ t "engine: REVIEW.md iconv reads that raw file into the body" "yes" \
   "$(grep -qF 'iconv -f UTF-8 -t UTF-8 -c < rraw.txt > rbody.txt' "$ENGINE" && echo yes || echo no)"
 
 t "engine: verifier counts KEEP as well as DROP" "yes" \
-  "$(grep -qF 'grep -ciE ' "$ENGINE" && grep -qF '(KEEP|DROP)' "$ENGINE" && echo yes || echo no)"
+  "$(grep -qF '(KEEP|DROP)' "$ENGINE" && echo yes || echo no)"
+
+t "engine: verifier coverage is compared against the candidate ids" "yes" \
+  "$(grep -qF 'vwanted=$(printf' "$ENGINE" && grep -qF '"${vconform:-0}" -lt "${vwanted:-0}"' "$ENGINE" && echo yes || echo no)"
+
+t "engine: a partial verifier answer sets its own note" "yes" \
+  "$(grep -qF 'Verifier answered for ${vconform} of ${vwanted} findings' "$ENGINE" && echo yes || echo no)"
 
 t "engine: an unreadable verifier response sets a note" "yes" \
   "$(grep -qF 'Verifier output was unreadable this round' "$ENGINE" && echo yes || echo no)"

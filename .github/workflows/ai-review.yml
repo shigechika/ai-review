@@ -1347,16 +1347,24 @@ jobs:
                 | grep -oiE '^[[:space:]]*[A-Za-z0-9]+[[:space:]]*:[[:space:]]*DROP' \
                 | cut -d: -f1 | tr -d ' \t' \
                 | tr '[:lower:]' '[:upper:]' | paste -sd, - || true)
-              # A non-empty response that matches NOTHING is not the same as
-              # "nothing to drop": the verifier may have answered in prose,
-              # or in a shape this extraction cannot read. Counting KEEP as
-              # well as DROP is what tells those apart — without it, an
-              # unreadable verdict silently promoted every candidate to
-              # "verified".
+              # A response that does not carry a readable verdict for EVERY
+              # candidate is not the same as "nothing to drop". Two shapes
+              # hide there: an answer in prose (or a shape this extraction
+              # cannot read), and a partial answer that covers some ids and
+              # silently leaves the rest looking verified. Counting KEEP as
+              # well as DROP is what makes the first visible — a DROP-only
+              # count cannot tell a clean all-KEEP round from an unreadable
+              # one — and comparing that count against the candidate ids is
+              # what makes the second visible.
               vconform=$(printf '%s\n' "$verdicts" \
-                | grep -ciE '^[[:space:]]*[A-Za-z0-9]+[[:space:]]*:[[:space:]]*(KEEP|DROP)' || true)
+                | grep -oiE '^[[:space:]]*[A-Za-z0-9]+[[:space:]]*:[[:space:]]*(KEEP|DROP)' \
+                | cut -d: -f1 | tr -d ' \t' \
+                | tr '[:lower:]' '[:upper:]' | sort -u | grep -c . || true)
+              vwanted=$(printf '%s\n' "$ids" | grep -c . || true)
               if [ "${vconform:-0}" -eq 0 ]; then
                 VERIFIER_NOTE="Verifier output was unreadable this round — findings above are unverified."
+              elif [ "${vconform:-0}" -lt "${vwanted:-0}" ]; then
+                VERIFIER_NOTE="Verifier answered for ${vconform} of ${vwanted} findings this round — the rest are unverified."
               fi
             else
               VERIFIER_NOTE="Verifier pass unavailable this round — findings above are unverified."
