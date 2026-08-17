@@ -1,6 +1,6 @@
 # ai-review
 
-[English README](README.md)
+[English](README.md) | 日本語
 
 Pull Requestを**アドバイザリなAIコードレビュー**にかける、再利用可能な
 GitHub Actionsワークフローです。自前のOpenAI互換エンドポイント（Azure AI
