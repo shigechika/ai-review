@@ -1,6 +1,6 @@
 # ai-review
 
-[日本語版 README](README.ja.md)
+English | [日本語](README.ja.md)
 
 A reusable GitHub Actions workflow for **advisory AI code review** of pull
 requests, using your own OpenAI-compatible endpoint (tested against the Azure
