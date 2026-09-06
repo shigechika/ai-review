@@ -219,13 +219,17 @@ set — see "pr-gate.yml invariants" below.
   the header says "imported by a changed file — evidence, not report
   scope", which holds even when that list is empty on API failure.
 - Candidate ORDER matters more than candidate COUNT under a cap. The
-  import resolver emits module candidates of every tier before any
-  name-as-submodule guess, because six imports with a few names each
-  filled the 40-entry cap with guesses before the sixth module (or the
-  `src/` fallback the nested-tests layout needs) was reached
-  (advisor + R2F1 on PR #60). And an empty prefix is a real package
-  root: a string-joined root set silently dropped it, masked by the
-  always-on fallback — roots are counted arrays for that reason.
+  import resolver emits tier-major (relative, anchored, fallback, then
+  the name-as-submodule guesses of each) and, within a tier,
+  BREADTH-FIRST across imports by variant (every import as `mod.py`,
+  then as `src/mod.py`, then the two `__init__.py` forms). Depth-first
+  — four candidates per import — filled the 40-entry cap with ten
+  imports and dropped the eleventh wholesale, and a path first seen as
+  a guess had to be PROMOTED when imported directly later, not
+  rejected as already seen (advisor, R2F1 and R3F1 on PR #60, one
+  round each). And an empty prefix is a real package root: a
+  string-joined root set silently dropped it, masked by the always-on
+  fallback — roots are counted arrays for that reason.
 - Truncation must be labelled: a clamped attachment gets the `TRUNCATED`
   header, never a "full content" label. The label is decided on what the
   CAP actually clamped, not on the final byte count — `head -c` and

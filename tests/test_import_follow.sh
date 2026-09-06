@@ -116,6 +116,28 @@ resolve src/pkg/mod.py $'from . import bare\nfrom pkg.core import guess' > /tmp/
 t "order: bare relative name stays ahead of name guesses" "yes" \
   "$([ "$(grep -nxF src/pkg/bare.py /tmp/pic_out.txt | cut -d: -f1)" -lt "$(grep -nxF src/pkg/core/guess.py /tmp/pic_out.txt | cut -d: -f1)" ] && echo yes || echo no)"
 
+# R3F1: a path first recorded as a name guess (tier 6) must be PROMOTED
+# when a later statement imports it directly, not rejected as already
+# seen. With nine unrelated imports in between this is also the case the
+# breadth-first order exists for: depth-first, four candidates per import
+# put pkg/sub.py at position 41 even after promotion.
+src='from pkg import sub, helper'
+for m in a b c d e f g h i; do src="$src"$'\n'"import other_$m"; done
+src="$src"$'\n''import pkg.sub'
+resolve tests/test_mod.py "$src" > /tmp/pic_out.txt
+pos_sub=$(grep -nxF pkg/sub.py /tmp/pic_out.txt | cut -d: -f1)
+pos_guess=$(grep -nxF pkg/helper.py /tmp/pic_out.txt | cut -d: -f1)
+t "R3F1: directly imported module promoted ahead of the remaining guess" "yes" \
+  "$([ -n "$pos_sub" ] && [ -n "$pos_guess" ] && [ "$pos_sub" -lt "$pos_guess" ] && echo yes || echo no)"
+t "R3F1: promoted path printed exactly once"  "1" "$(grep -cxF pkg/sub.py /tmp/pic_out.txt)"
+t "R3F1: within the 40-entry cap"             "yes" "$([ -n "$pos_sub" ] && [ "$pos_sub" -le 40 ] && echo yes || echo no)"
+# Breadth-first within a tier: every import as mod.py before any as
+# src/mod.py, and both before the __init__ forms.
+t "breadth-first: all root .py before the first src/ variant" "yes" \
+  "$([ "$(grep -nxF other_i.py /tmp/pic_out.txt | cut -d: -f1)" -lt "$(grep -nxF src/other_a.py /tmp/pic_out.txt | cut -d: -f1)" ] && echo yes || echo no)"
+t "breadth-first: src .py before the first __init__" "yes" \
+  "$([ "$(grep -nxF src/other_i.py /tmp/pic_out.txt | cut -d: -f1)" -lt "$(grep -nxF other_a/__init__.py /tmp/pic_out.txt | cut -d: -f1)" ] && echo yes || echo no)"
+
 # ---------- Root-level package is a real root (empty prefix) ----------
 # A string-joined root set dropped the empty prefix; the always-on
 # fallback masked it. With counted roots pkg/core.py is an ANCHORED
