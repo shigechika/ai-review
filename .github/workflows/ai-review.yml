@@ -533,7 +533,8 @@ jobs:
           # new-commits diff on top of the full PR diff, and the combined
           # ceiling (diff 100 KB + delta 100 KB + guidance 96 KiB + review
           # override 8 KiB + files 128 KiB + READMEs 64 KiB + PR body
-          # 16 KiB) should stay in the same band as before the merge.
+          # 16 KiB + prior review 8 KiB) should stay in the same band as
+          # before the merge.
           # Callers can override FILES_TOTAL_CAP via the
           # max-total-file-bytes input.
           GUIDANCE_CAP=49152          # per guidance file
@@ -1488,21 +1489,60 @@ jobs:
           # NOT given to the verifier — a judge reading someone else
           # confident prose about a finding is exactly how a real finding
           # gets dropped.
+          # BOTH surfaces, because either can be empty. Verified on this
+          # workflow own PR #66: the other reviewer posted a 3 KB review
+          # BODY and zero inline comments, so a fetch of the inline
+          # comments alone found nothing at all.
+          #
+          # Straight to a file, never through a shell variable: a command
+          # substitution has no bound, and the cap below would be applied
+          # only after the whole response was already in memory.
           : > priorreview.txt
+          : > prior_raw.txt
+          : > prior_inline.txt
+          : > prior_body.txt
           prior_n=0
           prior_bytes=0
           pstatus=0
-          prior_raw=$(gh api "repos/$GH_REPO/pulls/$PR/comments" --paginate \
-            --jq ".[] | select(.user.login == \"copilot-pull-request-reviewer[bot]\") | \"\(.path):\(.line // .original_line) - \(.body)\"" 2>/dev/null) || pstatus=$?
+          gh api "repos/$GH_REPO/pulls/$PR/comments" --paginate \
+            --jq ".[] | select(.user.login == \"copilot-pull-request-reviewer[bot]\") | \"\(.path):\(.line // .original_line) - \(.body)\"" > prior_inline.txt 2>/dev/null || pstatus=$?
+          gh api "repos/$GH_REPO/pulls/$PR/reviews" --paginate \
+            --jq ".[] | select(.user.login == \"copilot-pull-request-reviewer[bot]\") | select(.body != null and .body != \"\") | .body" > prior_body.txt 2>/dev/null || pstatus=$?
+          # Keep the NEWEST of each surface, not the first bytes of the
+          # concatenation. Both endpoints return oldest first, so a head cut
+          # would drop exactly the comments the current round most needs to
+          # avoid repeating, and inline comments would always spend the
+          # budget before any review body was reached (codex review of
+          # PR #66). Each surface gets half, and an under-budget one donates
+          # the remainder to the other rather than wasting it.
+          prior_half=$((PRIOR_REVIEW_CAP / 2))
+          prior_isize=$(wc -c < prior_inline.txt | tr -d " ")
+          prior_bsize=$(wc -c < prior_body.txt | tr -d " ")
+          prior_ishare=$prior_half
+          prior_bshare=$prior_half
+          if [ "$prior_isize" -lt "$prior_half" ]; then
+            prior_ishare=$prior_isize
+            prior_bshare=$((PRIOR_REVIEW_CAP - prior_isize))
+          elif [ "$prior_bsize" -lt "$prior_half" ]; then
+            prior_bshare=$prior_bsize
+            prior_ishare=$((PRIOR_REVIEW_CAP - prior_bsize))
+          fi
+          {
+            tail -c "$prior_ishare" prior_inline.txt || true
+            tail -c "$prior_bshare" prior_body.txt || true
+          } > prior_raw.txt 2>/dev/null || true
           if [ "$pstatus" -ne 0 ]; then
             echo "::notice::could not list prior review comments — reviewing without them this round"
-          elif [ -n "$prior_raw" ]; then
-            printf '%s\n' "$prior_raw" \
-              | grep -v 'ai-review-ledger-v1:' \
+            : > prior_raw.txt
+          elif [ -s prior_raw.txt ]; then
+            grep -v 'ai-review-ledger-v1:' prior_raw.txt \
               | grep -v '^===FINDING' \
               | grep -v '^===LEDGER===' \
               | head -c "$PRIOR_REVIEW_CAP" \
               | iconv -f UTF-8 -t UTF-8 -c 2>/dev/null > priorreview.txt || true
+            # head -c above is a belt-and-braces bound only: the two shares
+            # already sum to PRIOR_REVIEW_CAP and stripping cannot grow the
+            # text.
             prior_bytes=$(wc -c < priorreview.txt | tr -d " ")
             prior_n=$(grep -c . priorreview.txt || true)
             case "$prior_n" in ""|*[!0-9]*) prior_n=0 ;; esac
