@@ -49,8 +49,19 @@ t "...checked against the ROUND list, not the whole PR" "no" \
 # skip has to read what LANDED, or the README ends up in neither place.
 t "...and against what was ATTACHED, not merely listed" "no" \
   "$(grep -F 'grep -qxF "$rf"' /tmp/re_run.sh | grep -qF 'attach_list.txt' && echo yes || echo no)"
+# Placement, not mere presence: a write ahead of the deny-list or the
+# budget checks would record files that never reached the prompt, which
+# is the bug this list exists to prevent. Assert the ORDER — budget
+# check, then the append to changedfiles.txt, then the record.
 t "the attached list records every file that landed" "yes" \
-  "$(grep -A1 -F '} >> changedfiles.txt' /tmp/re_run.sh | grep -qF 'attached.txt' || grep -qF "printf '%s\\n' \"\$f\" >> attached.txt" /tmp/re_run.sh && echo yes || echo no)"
+  "$(awk '
+      /remaining=\$\(\(FILES_TOTAL_CAP/ { budget = NR }
+      /\} >> changedfiles.txt/ { landed = NR }
+      />> attached.txt/ { recorded = NR }
+      END { exit !(budget && landed && recorded && budget < landed && landed < recorded) }
+    ' /tmp/re_run.sh && echo yes || echo no)"
+t "...and the record cannot fail the job" "yes" \
+  "$(grep -F '>> attached.txt' /tmp/re_run.sh | grep -qF '|| true' && echo yes || echo no)"
 t "own budget, not the changed-file pool" "yes" \
   "$(grep -qF 'README_TOTAL_CAP - readme_total' /tmp/re_run.sh && echo yes || echo no)"
 t "...and not a FILE_COUNT_CAP slot"      "no" \
