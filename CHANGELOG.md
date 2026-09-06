@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.9.0](https://github.com/shigechika/ai-review/compare/v1.8.0...v1.9.0) (2026-09-06)
+
+
+### Features
+
+* report redundancy the diff leaves behind, and read a prior reviewer's comments ([#66](https://github.com/shigechika/ai-review/issues/66)) ([c62933b](https://github.com/shigechika/ai-review/commit/c62933bcf798ffa1dae5b91822313167b2cd706d))
+
 ## [1.8.0](https://github.com/shigechika/ai-review/compare/v1.7.0...v1.8.0) (2026-09-06)
 
 
