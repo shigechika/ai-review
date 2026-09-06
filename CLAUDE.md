@@ -320,6 +320,24 @@ set — see "pr-gate.yml invariants" below.
   inline comment —
   a reply to it is a conversation this workflow did not start. A finding
   whose line is not in the diff stays sticky-only and is counted.
+- A new reporting CLASS needs three places to agree, not one. The
+  code-mode bar admits two checks that name no failing input — a README
+  claim the diff falsifies, and redundancy the diff leaves behind — and
+  each needed the positive admission clause ("report only if you can name
+  the concrete failing input"), the exception list, AND the verifier
+  criterion ("would the concern change observed behavior") widened
+  together. Adding one alone is a no-op that reads like a feature: the
+  admission clause filters the class out before the exception is read,
+  and the verifier drops whatever survives. Caught twice on PR #64, once
+  by `/code-review` after the engine had already shipped the exception.
+  `tests/test_focus_exceptions.sh` pins all three.
+- Comments by another reviewer are UNTRUSTED, the same class as the diff:
+  framed as data, stripped of marker-shaped lines so one cannot plant a
+  decoy finding or ledger entry, capped, and deliberately withheld from
+  the verifier — a judge reading someone else confident prose about a
+  finding is how a real finding gets dropped. Never waited for: the other
+  reviewer is requested by hand in this family, so a round that runs
+  first simply finds none.
 - Delta mode requires a strictly-`ahead` compare; docs-only skip sits
   behind the same guard. Do not move either in front of it.
 - User-facing strings that other code greps for (`No findings clear the

@@ -97,6 +97,18 @@ engine:
    (parity belongs to a documentation-only PR, item 6). Skipped when the
    round already attached that file as a changed file, and turned off
    entirely by `AI_REVIEW_DISABLE_README`.
+9. Two more things the reporting bar allows, both of which name no failing
+   input and so need saying explicitly: the README check above, and
+   **redundancy the diff leaves behind** — a function, branch, constant or
+   pattern it adds that a file already in the prompt provides, or a path it
+   makes unreachable. Both sides must be cited; duplication that cannot be
+   pointed at inside the prompt is not reportable, because the prompt holds
+   the changed files and what they import, never the whole repository.
+10. If **another reviewer has already commented** on the PR, their comments
+   are replayed to the model as data, so it looks for what they missed
+   instead of restating them. Never waited for: a round that runs first
+   simply finds none. Treated as untrusted content — framed as data,
+   stripped of marker-shaped lines, capped, and withheld from the verifier.
 
 The review is **advisory only**: every failure path soft-fails, so this job
 can never block a PR.
@@ -218,7 +230,8 @@ itself — and check the `review` job's log:
   is present at the base revision. Missing entirely means you have none,
   which is normal.
 - `::notice::ai-review context: docs_mode=… delta_mode=… diff=…B …
-  review_override=…B … files=… imports=… readmes=…` — one line summarizing
+  review_override=…B … files=… imports=… readmes=… prior_review=…` — one
+  line summarizing
   what was actually sent to the model. `diff=0B` or a missing line means
   the diff fetch failed.
 - `::warning::AI_REVIEW_ENDPOINT / AI_REVIEW_API_KEY not set — skipping AI

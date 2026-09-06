@@ -15,10 +15,10 @@ t "run block extracted" "yes" "$([ -s /tmp/re_run.sh ] && echo yes || echo no)"
 # one — the lesson this repository recorded when REVIEW.md was added.
 extract_between "focus_para='Focus on: real bugs" "most severe first.'" > /tmp/re_code.txt
 t "code-mode paragraph extracted"        "yes" "$([ -s /tmp/re_code.txt ] && echo yes || echo no)"
-t "carve-out names the diff, not drift"  "yes" "$(grep -qF 'THIS DIFF makes false' /tmp/re_code.txt && echo yes || echo no)"
-t "carve-out is phrased as an addition"  "yes" "$(grep -qF 'IS\n          reportable, even though documentation accuracy is otherwise' /tmp/re_code.txt || grep -qF 'reportable, even though documentation accuracy is otherwise' /tmp/re_code.txt && echo yes || echo no)"
+t "carve-out names the diff, not drift"  "yes" "$(grep -qF 'attached README that THIS DIFF makes' /tmp/re_code.txt && echo yes || echo no)"
+t "carve-out is phrased as an addition"  "yes" "$(grep -qF 'false IS reportable, even though documentation accuracy is' /tmp/re_code.txt && echo yes || echo no)"
 t "carve-out demands both citations"     "yes" \
-  "$(grep -qF 'name the README file and' /tmp/re_code.txt && echo yes || echo no)"
+  "$(grep -qF 'name the README' /tmp/re_code.txt && echo yes || echo no)"
 t "pre-existing wrongness excluded"      "yes" "$(grep -qF 'already wrong before this diff' /tmp/re_code.txt && echo yes || echo no)"
 t "READMEs are evidence, not scope"      "yes" "$(grep -qF 'evidence, never report scope' /tmp/re_code.txt && echo yes || echo no)"
 
@@ -121,13 +121,13 @@ t "the admission clause lets a documentation finding through" "yes" \
 # the exception ("style or formatting", "anything a linter...") read as
 # reportable instead of excluded.
 t "the exception is its own sentence, after the list closes" "yes" \
-  "$(awk '/anything the findings ledger marks/ {seen = 1} seen && /Exactly one exception to that list/ {found = 1} END {exit !found}' /tmp/re_code.txt && echo yes || echo no)"
+  "$(awk '/anything the findings ledger marks/ {seen = 1} seen && /Exactly two exceptions to that list/ {found = 1} END {exit !found}' /tmp/re_code.txt && echo yes || echo no)"
 t "...and the list still ends with its own clauses" "yes" \
   "$(awk '/Do NOT report:/ {n = 1} n && /style or formatting/ {a = 1} n && /findings ledger marks fixed or/ {found = (a == 1); exit} END {exit !found}' /tmp/re_code.txt && echo yes || echo no)"
 # The verifier judged every candidate on "would it change observed
 # behavior", which a documentation contradiction never does.
 t "the verifier is told that criterion cannot drop this class" "yes" \
-  "$(grep -qF 'never grounds to DROP one' /tmp/re_run.sh && echo yes || echo no)"
+  "$(grep -qF 'never grounds to DROP' /tmp/re_run.sh && echo yes || echo no)"
 
 # ---------- Caps tuned before REVIEW.md existed ----------
 t "both modes cap findings at the same number" "2" "$(grep -c 'Report at most 5 findings, most severe first' /tmp/re_run.sh)"
