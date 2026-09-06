@@ -123,6 +123,9 @@ t "stdlib list: typing_extensions is resolved (not stdlib)" "yes" "$(has typing_
 resolve src/pkg/mod.py $'# see the """ docstring below\nimport after_comment\n    # indented """ too\nimport after_indented' > /tmp/pic_out.txt
 t "R9F1: import after a comment containing triple quotes" "yes" "$(has after_comment.py)"
 t "R9F1: import after an indented such comment"          "yes" "$(has after_indented.py)"
+# R11F1: inside a string a `# """` line is content and may close it.
+resolve src/pkg/mod.py $'x = """\n# """\nimport after_close' > /tmp/pic_out.txt
+t "R11F1: hash-prefixed closing delimiter inside a string" "yes" "$(has after_close.py)"
 
 # ---------- Shape details ----------
 resolve src/pkg/mod.py $'import httpx\nfrom .util import a\nfrom pkg.core import b' > /tmp/pic_out.txt

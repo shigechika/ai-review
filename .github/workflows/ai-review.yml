@@ -975,10 +975,11 @@ jobs:
               # open/close state by counting delimiters per line (odd
               # count flips it); \047 is the apostrophe, which this
               # single-quoted program cannot contain literally. A comment
-              # line is dropped before counting: a `# """` would otherwise
-              # flip the state and swallow every import after it (R9F1 on
-              # PR #60).
-              if (line ~ /^[ \t]*#/) next
+              # line OUTSIDE a string is dropped before counting: a `# """`
+              # would otherwise flip the state and swallow every import
+              # after it (R9F1 on PR #60); inside a string the same line is
+              # string content and may be the closing delimiter (R11F1).
+              if (!instr && line ~ /^[ \t]*#/) next
               tq = gsub(/"""/, "", line) + gsub(/\047\047\047/, "", line)
               if (tq % 2 == 1) { instr = !instr; next }
               if (instr) next
