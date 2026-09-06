@@ -16,7 +16,8 @@ engine:
 1. Builds a review prompt from the PR title/description, the **repository
    guidance files** (`CLAUDE.md`, `AGENTS.md`,
    `.github/copilot-instructions.md`), the **full contents of the changed
-   files**, and the diff. An optional **`REVIEW.md`** at the repository
+   files** (plus, for code PRs, the modules they import — see 7), and the
+   diff. An optional **`REVIEW.md`** at the repository
    root is spliced in ahead of everything else and takes precedence over
    the default focus and severity calibration wherever the two conflict —
    useful for repository-specific rules (stricter severity, paths to
@@ -56,6 +57,26 @@ engine:
    too, so a claim present in one language but missing or contradicted in
    the other gets flagged — phrasing and translation style are explicitly
    out of scope, only what is claimed.
+7. For a **code PR**, the Python modules the changed files import are
+   attached too, after the changed files and under a separate
+   `Imported file` header, so a call into an unchanged callee is checked
+   against its real signature instead of guessed at. Resolution is
+   syntactic (there is no checkout): relative imports first, then
+   absolute imports anchored on the changed paths' own package roots,
+   and a fallback — repository root, `src/`, and the importing file's own
+   directory — that is always tried behind them, so a tests-only PR still
+   finds its subject, a `tests/pkg/` package cannot hide `src/pkg/`, and a
+   script's `import util` finds `scripts/util.py`. Candidates are settled
+   by listing each candidate directory once (not by probing paths), so
+   only files that exist compete for the slots. A candidate that came from
+   the layout fallback says so in its header: several directories can hold
+   a module of the same name and Python resolves exactly one, so it is
+   offered as a possible resolution rather than as the imported module.
+   Set `AI_REVIEW_DISABLE_IMPORTS` to turn the whole step off.
+   Forward direction only — callers of the changed code are not found,
+   and the prompt tells the model not to read their absence as evidence.
+   Same deny-list and byte budget as the changed files, plus a slot cap
+   of their own (6).
 
 The review is **advisory only**: every failure path soft-fails, so this job
 can never block a PR.
@@ -207,7 +228,8 @@ Everything is optional. Each setting resolves as
 | `model` | `AI_REVIEW_MODEL` | `gpt-5.6-sol` | Deployment name sent to the endpoint. |
 | `reasoning-effort` | `AI_REVIEW_EFFORT` | `high` | Reviewer `reasoning_effort`. Sentinel `off` stops sending the parameter (an empty value does **not** work — it falls back to the default). |
 | — | `AI_REVIEW_VERIFY_EFFORT` | `low` | Verifier `reasoning_effort` (same `off` sentinel). |
-| `max-total-file-bytes` | — | `131072` | Combined byte budget for attached changed-file contents. |
+| — | `AI_REVIEW_DISABLE_IMPORTS` | unset | Any non-empty value stops attaching the modules the changed files import. The rest of the review is unaffected. |
+| `max-total-file-bytes` | — | `131072` | Combined byte budget for attached file contents: changed files first, then the modules they import. |
 
 Because a called workflow resolves `vars.*` against the **calling**
 repository, per-repo settings (e.g. `AI_REVIEW_LANG=ja`) need no input
@@ -374,8 +396,8 @@ the short version:
   kills the symlink-to-`/proc/self/environ` class of attack).
 - **Guidance is read at the BASE revision** — the files that *steer* the
   model must not be editable by the PR being reviewed. The changed-file
-  attachments are read at HEAD on purpose: they are the review *subject*,
-  the same trust class as the diff. The guidance paths are also on the
+  and imported-file attachments are read at HEAD on purpose: they are the
+  review *subject* and its evidence, the same trust class as the diff. The guidance paths are also on the
   attachment deny-list so a PR cannot smuggle its own version in through
   the subject channel.
 - **Deny-lists before size caps**: secrets-shaped files (`.env`-style,

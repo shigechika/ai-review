@@ -161,6 +161,8 @@ t "engine: guidance TRUNCATED is decided on the clamped size" "yes" \
 
 t "engine: REVIEW.md TRUNCATED is decided on the clamped size" "yes" \
   "$(grep -qF 'if [ "$rclamped" -lt "$rtotal" ]; then' "$ENGINE" && echo yes || echo no)"
+t "engine: attached-file TRUNCATED is decided on the clamped size" "yes" \
+  "$(grep -qF 'if [ "$fclamped" -lt "$fsize" ]; then' "$ENGINE" && echo yes || echo no)"
 
 # Both halves are asserted: the cap writing the raw file, AND iconv reading
 # that raw file into the body. Checking only the first half lets the iconv
