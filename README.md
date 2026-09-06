@@ -29,7 +29,8 @@ engine:
    format.
 3. Runs a second, cheap **verifier call** that tries to refute each candidate
    finding; refuted ones are dropped before anything is posted.
-4. Posts **one sticky comment** per PR at a time with a one-line verdict,
+4. Posts each surviving finding as an **inline review comment** on the line
+   it names, and **one sticky comment** per PR at a time with a one-line verdict,
    the surviving findings, and a machine-readable **findings ledger**
    that carries per-finding status (`open`/`fixed`/`dismissed`) across
    rounds — settled points are never re-argued. Every round that
@@ -44,7 +45,15 @@ engine:
    current review state is always the most recent `ai-review` comment in
    the thread, though not necessarily the very last comment overall — a
    skipped push posts nothing itself, so a human comment made afterward
-   can land below the sticky one.
+   can land below the sticky one. The inline comments are an additional
+   view of the same findings, never the state: they are posted only after
+   the sticky comment lands, one API call each so one failure cannot lose
+   the rest, deduplicated by a hidden marker so a finding is never posted
+   twice, and skipped for a finding whose line is not part of the diff
+   (that one stays in the sticky comment). A prior inline comment is never
+   deleted — unlike the sticky comment, which is reposted each round — so a
+   reply to one survives. Needs no permission beyond the
+   `pull-requests: write` the caller template already grants.
 5. On later pushes, reviews only the **new commits** (delta rounds via the
    compare API), and **skips posting entirely** for docs-only pushes to
    code PRs or a head already reviewed, degrading safely to a full-diff

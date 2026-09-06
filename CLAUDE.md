@@ -302,6 +302,24 @@ set — see "pr-gate.yml invariants" below.
   on one side only made a model that emitted the same id twice look
   permanently under-answered — a false alarm on the very signal this
   exists to raise.
+- Inline review comments are a VIEW, never the state. The sticky comment
+  plus its ledger is what later rounds read, so inline posting runs only
+  after the sticky post succeeds (the ids are not stable otherwise), one
+  API call per finding rather than one review with a `comments[]` array
+  (that array is atomic — one unaddressable line rejects every comment in
+  it and GitHub does not say which), and it is deduplicated by a marker in
+  the body rather than by the ledger, since the ledger knows a finding was
+  REPORTED and not that its inline post succeeded. That marker does NOT
+  amount to a retry, and saying so was wrong (caught by this engine on PR
+  #62): the next round builds `kept.txt` from that round only and the
+  protocol forbids repeating a finding the ledger carries, so a failed
+  post is warned about and stays sticky-only. Read only the FIRST line of
+  a comment body when looking for the marker, and require the id shape —
+  the rest of the body is rendered model output, which could otherwise
+  quote a marker and suppress a real finding forever. Never delete a prior
+  inline comment —
+  a reply to it is a conversation this workflow did not start. A finding
+  whose line is not in the diff stays sticky-only and is counted.
 - Delta mode requires a strictly-`ahead` compare; docs-only skip sits
   behind the same guard. Do not move either in front of it.
 - User-facing strings that other code greps for (`No findings clear the

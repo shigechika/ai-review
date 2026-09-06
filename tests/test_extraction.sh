@@ -9,7 +9,7 @@ run=$(extract_run)
 t "extract_run non-empty"          "yes" "$([ -n "$run" ] && echo yes || echo no)"
 t "extract_run starts correctly"   "yes" "$(printf '%s\n' "$run" | head -1 | grep -qF 'if [ -z "$PR" ]; then' && echo yes || echo no)"
 t "extract_run has no blank gaps"  "yes" "$(printf '%s\n' "$run" | grep -q '^          #' && echo yes || echo no)"
-t "extract_run reaches the end"    "yes" "$(printf '%s\n' "$run" | tail -5 | grep -q 'failed to post AI review comment' && echo yes || echo no)"
+t "extract_run reaches the end"    "yes" "$(printf '%s\n' "$run" | tail -5 | grep -q 'post_inline_comments' && echo yes || echo no)"
 
 # The pure-awk extraction (used by every test) must match a from-scratch
 # YAML-aware extraction, so a change to the block's indentation base (the

@@ -47,6 +47,13 @@ name: AI review
 #   * Docs-only skip: a push whose delta touches only *.md files ends the
 #     round early with no comment update. Deliberately narrow — no attempt
 #     to detect comment-only code changes, which is too error-prone.
+#   * Posting: one sticky comment per PR carries the verdict, the findings
+#     and the machine-readable ledger, and is the durable state. Each
+#     surviving finding is ALSO posted as an inline pull-request review
+#     comment on the line it names, best-effort: only after the sticky post
+#     succeeds, one API call per finding, idempotent by a marker in the
+#     body, and a finding whose line GitHub will not accept simply stays in
+#     the sticky comment.
 #   * Reporting bar + verifier: the system prompt demands a concrete failing
 #     input and the resulting wrong behavior per finding (max 3 per round),
 #     and a second, cheap verifier call against the same deployment drops
@@ -252,10 +259,14 @@ jobs:
           # would leave page one (possibly all *.md) in $prfiles and switch
           # a code-changing PR into the laxer docs review. A failed call
           # yields the empty string instead, which keeps normal mode.
-          if ! prfiles=$(gh api "repos/$GH_REPO/pulls/$PR/files?per_page=100" --paginate \
-            --jq '.[] | .filename, (.previous_filename // empty)' 2>/dev/null); then
-            prfiles=""
+          # Saved raw rather than filtered through --jq, because the same
+          # response carries the per-file patches the inline-comment step
+          # needs later to know which lines GitHub will accept a comment on.
+          # One call, two readers.
+          if ! gh api "repos/$GH_REPO/pulls/$PR/files?per_page=100" --paginate > prfiles.json 2>/dev/null; then
+            : > prfiles.json
           fi
+          prfiles=$(jq -r '.[] | .filename, (.previous_filename // empty)' prfiles.json 2>/dev/null || true)
           if [ -n "$prfiles" ]; then
             non_md=$(printf '%s\n' "$prfiles" | grep -cv '\.md$' || true)
             case "$non_md" in ''|*[!0-9]*) non_md=1 ;; esac
@@ -2277,8 +2288,245 @@ jobs:
           # the very next round REGARDLESS of whether that round skips
           # (see _gc_stale_stickies's other call sites above), not only on
           # the next round that reaches this point.
+          sticky_posted=0
           if post_err=$(gh pr comment "$PR" --body-file comment.md 2>&1 >/dev/null); then
             _gc_stale_stickies ""
+            sticky_posted=1
           else
             echo "::warning::failed to post AI review comment: $(printf '%s' "$post_err" | tr '\n' ' ' | cut -c1-300)"
+          fi
+
+          # ---------- Inline review comments ----------
+          # The sticky comment above stays the durable state: the round
+          # summary, the verdict and the machine-readable ledger. These are
+          # an additional VIEW of the same surviving findings, anchored on
+          # the line each one already names, because a finding a reader has
+          # to go and find in a conversation comment is worth less than the
+          # same finding sitting on the line it is about.
+          #
+          # Best-effort by construction, and deliberately so:
+          #   * it runs only after the sticky post SUCCEEDED — if the ledger
+          #     did not land, the ids are not stable and posting against
+          #     them would strand comments the next round cannot reconcile;
+          #   * one API call per finding (not one review with a comments[]
+          #     array), because that array is atomic: a single unaddressable
+          #     line rejects every comment in it, and GitHub does not say
+          #     which one;
+          #   * a failure on one finding never stops the next, and never
+          #     fails the job — the advisory contract holds;
+          #   * deduplicated by a marker in the body rather than by the
+          #     ledger, because the ledger knows a finding was REPORTED and
+          #     not that its inline post succeeded. Note the LIMIT of that,
+          #     which an earlier version of this comment overstated (R1F1
+          #     on PR #62): the marker prevents a second copy, and lets a
+          #     finding be posted if a later round reports it again, but it
+          #     cannot RETRY a failed post on its own — the next round
+          #     builds kept.txt from that round findings only, and the
+          #     protocol forbids repeating a finding the ledger already
+          #     carries. A post that fails is reported in the warning below
+          #     and stays visible in the sticky comment; it does not come
+          #     back inline.
+          #
+          # A finding whose line GitHub would reject stays visible in the
+          # sticky comment. That is the normal outcome for a finding the
+          # model anchored outside the diff, which the prompt already
+          # forbids, so the count is worth a notice.
+
+          # Lines a review comment can be anchored to: the RIGHT side of
+          # every hunk in the PR diff. Built from the patches saved with the
+          # files response above — a file with no patch (binary, or past
+          # GitHub own size threshold) contributes nothing and its findings
+          # stay sticky-only. Program is single-quoted: no apostrophes.
+          # ---- commentable_lines ----
+          commentable_lines() { # prfiles.json on stdin path -> path<TAB>line
+            jq -r '.[] | select(.patch != null) | "===AIR-FILE=== " + .filename, .patch' prfiles.json 2>/dev/null \
+              | awk '
+                  # A unified-diff line starts with @, space, +, - or
+                  # backslash, so a line starting with = cannot come from a
+                  # patch body and is safe as the file separator.
+                  /^===AIR-FILE=== / { path = $0; sub(/^===AIR-FILE=== /, "", path); right = 0; next }
+                  path == "" { next }
+                  /^@@ / {
+                    s = $0
+                    sub(/^@@ [^+]*\+/, "", s)
+                    # Numeric coercion takes the leading digits of "c,d @@",
+                    # and of "c @@" for a one-line hunk with no count.
+                    right = s + 0
+                    next
+                  }
+                  right == 0 { next }
+                  # Deleted lines exist only on the left; the no-newline
+                  # marker is not a line at all.
+                  /^-/ { next }
+                  /^\\/ { next }
+                  { print path "\t" right; right++ }
+                '
+          }
+          # ---- end commentable_lines ----
+
+          # ---- finding_id ----
+          # Reads the first line of a finding block and prints its id in the
+          # canonical form, or nothing when the line does not carry one.
+          #
+          # The id is MODEL OUTPUT and it is about to be embedded in an HTML
+          # comment and read back by a fixed pattern, so it is validated
+          # here rather than trusted: an id carrying --> would close the
+          # marker early, and one the model wrote in lower case would post a
+          # marker that marker_ids can never match, so the finding would be
+          # posted again on any round that reports it again (found by
+          # /code-review on PR #62). Upper-cased for the same reason the
+          # ledger matches on toupper(id) — the model is not consistent
+          # about case and both sides must agree.
+          finding_id() {
+            printf '%s\n' "$1" \
+              | sed -n -E 's/^===FINDING[[:space:]]+([RrFf0-9]+)=*[[:space:]]*$/\1/p' \
+              | grep -iE '^R[0-9]+F[0-9]+$' \
+              | tr '[:lower:]' '[:upper:]' \
+              | head -1
+          }
+          # ---- end finding_id ----
+
+          # ---- marker_ids ----
+          # Reads the FIRST LINE of each of our inline comment bodies and
+          # prints the finding ids among them. Two narrowings, both
+          # deliberate: the id must have the shape this workflow emits, and
+          # only the first line is ever looked at — the rest of the body is
+          # rendered model output, and a finding whose prose happened to
+          # quote the marker for another id would otherwise suppress that
+          # id forever (found by this engine reviewing its own change,
+          # R1F2 on PR #62).
+          marker_ids() {
+            sed -n -E 's/^<!-- ai-review-inline-v1:(R[0-9]+F[0-9]+) -->[[:space:]]*$/\1/p' | sort -u
+          }
+          # ---- end marker_ids ----
+
+          # ---- finding_anchor ----
+          # First line of a finding block is "<file>:<line> - <summary>".
+          # Split on the FIRST ":<digits> - ", which is what awk match()
+          # gives: a path may contain a colon (so the split cannot be on the
+          # first colon) but essentially never contains ":<digits> - ",
+          # while a summary quite plausibly does ("see also x:99 - here").
+          # Taking the LAST occurrence gets that case wrong. Either way a
+          # bad split is caught downstream — the path has to be one of the
+          # PR own files and the line has to be in the diff — so the worst
+          # outcome is a finding that stays in the sticky comment. Prints
+          # path<TAB>line, or nothing when the line does not have that
+          # shape, which is a finding this step cannot anchor, not an error.
+          finding_anchor() {
+            printf '%s\n' "$1" | awk '
+              match($0, /:[0-9]+ - /) {
+                # RLENGTH covers the colon, the digits and the " - ".
+                print substr($0, 1, RSTART - 1) "\t" substr($0, RSTART + 1, RLENGTH - 4)
+                exit
+              }
+            '
+          }
+          # ---- end finding_anchor ----
+
+          post_inline_comments() {
+            local n_blocks i id anchor path line body_ok posted=0 unaddressable=0 already=0 failed=0 malformed=0
+            local icomments posted_ids istatus
+            [ -s kept.txt ] || return 0
+            # Author-filtered for the same reason the ledger is: anyone can
+            # post a comment carrying the marker, and a spoofed one must not
+            # be able to suppress a real finding. A failed listing means the
+            # round cannot tell what is already there, so it posts nothing
+            # rather than risk duplicating every finding.
+            istatus=0
+            icomments=$(gh api "repos/$GH_REPO/pulls/$PR/comments" --paginate \
+              --jq '.[] | select(.user.login == "github-actions[bot]") | .body | split("\n")[0]' 2>/dev/null) || istatus=$?
+            if [ "$istatus" -ne 0 ]; then
+              echo "::notice::inline comments skipped this round — the existing review comments could not be listed, and posting without that list would duplicate them"
+              return 0
+            fi
+            posted_ids=$(printf '%s\n' "$icomments" | marker_ids || true)
+            # No file list, no way to tell an unaddressable line from an
+            # unknown one: every finding would be reported as "not on a line
+            # GitHub accepts", which names a model problem for what is a
+            # failed fetch. Same rule as the guidance fetch — the two must
+            # not look alike (/code-review on PR #62).
+            if [ ! -s prfiles.json ]; then
+              echo "::notice::inline comments skipped this round — the PR file list is unavailable, so no finding line could be checked against the diff"
+              return 0
+            fi
+            commentable_lines > commentable.txt 2>/dev/null || : > commentable.txt
+            n_blocks=$(grep -c "^===FINDING " kept.txt 2>/dev/null || true)
+            case "$n_blocks" in ""|*[!0-9]*) n_blocks=0 ;; esac
+            i=0
+            while [ "$i" -lt "$n_blocks" ]; do
+              i=$((i + 1))
+              awk -v want="$i" '
+                /^===FINDING / { c++ }
+                c == want { print }
+                /^===END FINDING===/ { if (c == want) exit }
+              ' kept.txt > blk.txt 2>/dev/null || true
+              [ -s blk.txt ] || continue
+              id=$(finding_id "$(sed -n 1p blk.txt 2>/dev/null || true)")
+              if [ -z "$id" ]; then
+                # A block whose id this step cannot vouch for stays in the
+                # sticky comment, where the raw id is shown as the model
+                # wrote it.
+                malformed=$((malformed + 1))
+                continue
+              fi
+              if printf '%s\n' "$posted_ids" | grep -qxF "$id"; then
+                already=$((already + 1))
+                continue
+              fi
+              anchor=$(sed -n 2p blk.txt 2>/dev/null || true)
+              path=$(finding_anchor "$anchor" | cut -f1)
+              line=$(finding_anchor "$anchor" | cut -f2)
+              if [ -z "$path" ] || [ -z "$line" ] \
+                 || ! grep -qxF "$path"$'\t'"$line" commentable.txt; then
+                unaddressable=$((unaddressable + 1))
+                continue
+              fi
+              # Body: the marker first, then the same prose the sticky
+              # comment renders, minus the anchor line (the comment is
+              # already ON that line) and the severity line (it becomes the
+              # label). Model output reaches the API as a jq --rawfile
+              # value, never as a command argument.
+              {
+                echo "<!-- ai-review-inline-v1:$id -->"
+                awk -v id="$id" '
+                  NR <= 2 { next }
+                  /^===END FINDING===/ { next }
+                  tolower($0) ~ /^[[:space:]]*severity:[[:space:]]*(blocking|advisory)[[:space:]]*$/ {
+                    sev = $0
+                    sub(/^[[:space:]]*[Ss][Ee][Vv][Ee][Rr][Ii][Tt][Yy]:[[:space:]]*/, "", sev)
+                    sub(/[[:space:]]*$/, "", sev)
+                    next
+                  }
+                  { body = body $0 "\n" }
+                  END {
+                    printf "**%s**%s\n\n%s", id, (sev == "" ? "" : " (" sev ")"), body
+                  }
+                ' blk.txt
+                echo
+                echo "<sub>Advisory AI review — verify before acting. Round summary and ledger are in the ai-review comment.</sub>"
+              } | iconv -f UTF-8 -t UTF-8 -c 2>/dev/null > ibody.md || true
+              [ -s ibody.md ] || continue
+              body_ok=0
+              jq -n --rawfile body ibody.md --arg path "$path" --arg sha "$HEAD_SHA" --argjson line "$line" \
+                '{body: $body, commit_id: $sha, path: $path, line: $line, side: "RIGHT"}' > ipayload.json 2>/dev/null \
+                && body_ok=1
+              if [ "$body_ok" -ne 1 ] || [ ! -s ipayload.json ]; then
+                failed=$((failed + 1))
+                continue
+              fi
+              # stderr is discarded, never echoed: gh can quote the
+              # submitted body back, which is model output.
+              if gh api --method POST "repos/$GH_REPO/pulls/$PR/comments" --input ipayload.json >/dev/null 2>&1; then
+                posted=$((posted + 1))
+              else
+                failed=$((failed + 1))
+              fi
+            done
+            echo "::notice::inline comments: ${posted} posted, ${already} already present, ${unaddressable} not on a line GitHub accepts (kept in the sticky comment), ${malformed} with an unusable id, ${failed} failed"
+            [ "$failed" -eq 0 ] || echo "::warning::${failed} inline review comment(s) could not be posted — those findings are still in the sticky comment"
+            return 0
+          }
+
+          if [ "$sticky_posted" = "1" ]; then
+            post_inline_comments || true
           fi
