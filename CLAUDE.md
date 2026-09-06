@@ -336,6 +336,24 @@ set — see "pr-gate.yml invariants" below.
   general prose-quality review without discussing the tradeoff first —
   it was evaluated once already (README.ja.md rewrite, 2026-08-08) and
   deliberately kept out of the automated reviewer.
+  That discussion happened for ONE shape, which code-mode now allows:
+  a concrete claim in an attached README that THIS DIFF makes false,
+  citing both the README line and the diff line. It is the same
+  claim-vs-evidence lens pointed the other way — docs-mode judges
+  documentation against code, this judges a code change against
+  documentation — and it is bounded by four things that must stay:
+  the claim has to be concrete, the diff has to be what falsifies it
+  (pre-existing drift is a docs-mode finding, not this one), both lines
+  have to be cited, and the cross-language parity check is explicitly
+  NOT done here. The carve-out is worded as an ADDITION ("report that
+  check even though documentation accuracy is otherwise excluded"),
+  not as an override, for the reason the `REVIEW.md` section above
+  gives: nothing in a closed "Do NOT report" list conflicts with a new
+  check, so "wins where it conflicts" would be a no-op. The READMEs get
+  their own byte caps and their own fetch loop rather than a slot in
+  `FILE_COUNT_CAP`, and the VERIFIER gets them too — a judge that
+  cannot see the cited README refutes every finding this evidence
+  exists to enable.
 - Never name a real downstream/family caller repo or org (e.g. a
   specific private company/org name) in text that ships to a public
   artifact — PR body, issue body, commit message, or code comment. This
