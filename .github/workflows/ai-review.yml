@@ -61,6 +61,12 @@ name: AI review
 #     often lives in an unmodified function the changed code calls —
 #     invisible to a diff-only reviewer. Capped, deny-listed (secrets,
 #     binaries, guidance files) and labelled honestly when truncated.
+#   * Imported files (code-mode): the Python modules the changed files
+#     import are resolved syntactically (no checkout) and attached after
+#     the changed files, under a distinct "Imported file" header, so a
+#     call into an unchanged callee is checked rather than guessed at.
+#     Forward direction only — callers of the changed code are not found.
+#     Same deny-list and byte budget, plus their own slot cap.
 #   * Guidance, whole: repository guidance (CLAUDE.md, AGENTS.md,
 #     .github/copilot-instructions.md) is sent under generous byte caps. A
 #     former 8000-byte cap silently dropped an entire rule list that
@@ -101,7 +107,7 @@ name: AI review
 #     language              en|ja finding prose       (vars.AI_REVIEW_LANG, en)
 #     model                 deployment name           (vars.AI_REVIEW_MODEL, gpt-5.6-sol)
 #     reasoning-effort      reviewer effort           (vars.AI_REVIEW_EFFORT, high)
-#     max-total-file-bytes  attachment budget         (131072)
+#     max-total-file-bytes  attachment budget, changed + imported files (131072)
 #   vars only (no input):
 #     AI_REVIEW_VERIFY_EFFORT  verifier effort (low)
 #   The effort settings take the sentinel "off" to stop sending
@@ -135,7 +141,7 @@ on:
         required: false
         default: ""
       max-total-file-bytes:
-        description: "Combined byte budget for attached changed-file contents (default: 131072)"
+        description: "Combined byte budget for attached file contents, changed files first and then the modules they import (default: 131072)"
         type: string
         required: false
         default: ""
@@ -500,6 +506,12 @@ jobs:
           FILE_CAP=49152              # per changed file
           FILES_TOTAL_CAP=131072      # all changed files combined
           FILE_COUNT_CAP=15
+          # Imported-file slots. Imports share FILE_COUNT_CAP and
+          # FILES_TOTAL_CAP with the changed files and are attached AFTER
+          # them, so the changed files (the review subject) always win the
+          # budget; this sub-cap only stops a PR with two small changed
+          # files from filling every remaining slot with callee modules.
+          IMPORT_COUNT_CAP=6
           case "$FILES_TOTAL_CAP_INPUT" in
             ''|*[!0-9]*) : ;;         # unset or non-numeric: keep the default
             # 10# forces base-10: a digits-only value with a leading zero
@@ -826,110 +838,274 @@ jobs:
             cat attach_docs.txt >> attach_list.txt
           fi
           : > changedfiles.txt
+          : > imports_raw.txt
+          printf '%s\n' "$prfiles" > prfiles.txt
           files_total=0
           files_n=0
+          imports_total=0
+          imports_n=0
           skipped=""
-          while IFS= read -r f; do
-            [ -n "$f" ] || continue
-            # Three kinds of exclusion, and the first two are not about
-            # tokens.
-            #
-            # GUIDANCE: the steering files must never arrive through this
-            # path. Attaching them would defeat the base-revision rule one
-            # section up by relabelling the PR's own version from "guidance"
-            # to "changed file": both copies would sit in the prompt with
-            # nothing establishing precedence, and the head copy is the
-            # later and (if the PR grew the file) longer one. A PR could
-            # then write itself an exemption into the guidance and have the
-            # model apply it. The diff still shows the change — only the
-            # full steering text is withheld.
-            #
-            # SECRETS: attaching whole files widens exposure in a way the
-            # diff never did. A PR adding one line to a credentials file
-            # used to leak only that line through the diff hunk; sending the
-            # file would hand the model every other value in it and invite
-            # them into a public PR comment. Env-style files (some repos
-            # track one under a name like `dot.env`) and config or key
-            # material that carries credentials are excluded for the same
-            # reason. Keep this list ahead of the size caps: a secret must
-            # never be attached, however small.
-            #
-            # NOISE: lock files and minified bundles are large, mechanical
-            # and never the subject of a review finding.
-            # Pattern note: in a shell `case`, `*` crosses `/`, so pure
-            # SUFFIX patterns (*.env, *.pem, *.lock) already match at any
-            # depth. Anchored basename patterns do not: `.env.*` or
-            # `config.ini` alone would miss `apps/api/.env.production` and
-            # `deploy/config.ini`, silently attaching nested credential
-            # files (found by this workflow reviewing its own change, R1F1).
-            # Every anchored pattern therefore carries a `*/` twin. The
-            # guidance names stay root-only on purpose — those are the paths
-            # the guidance fetch reads, and a nested copy is an ordinary
-            # changed file.
-            case "$f" in
-              CLAUDE.md|AGENTS.md|.github/copilot-instructions.md|REVIEW.md)
-                skipped="$skipped $f"; continue ;;
-              dot.env|*/dot.env|.env|*/.env|*.env|.env.*|*/.env.*) skipped="$skipped $f"; continue ;;
-              config.ini|*/config.ini|*.pem|*.key|*.p12|*.pfx|id_rsa*|*/id_rsa*|*service_account*.json)
-                skipped="$skipped $f"; continue ;;
-              *.lock|package-lock.json|*/package-lock.json|*.min.*|*.min) skipped="$skipped $f"; continue ;;
-              # BINARY / BULK DATA: the API hands these back base64 like any
-              # other blob, so without a filter a tracked PNG or a .pickle.xz
-              # would decode into the prompt as 48 KiB of noise AND consume
-              # one of the attachment slots that a source file needed.
-              *.png|*.jpg|*.jpeg|*.gif|*.webp|*.ico|*.pdf|*.xls|*.xlsx|*.zip|*.gz|*.xz|*.bz2|*.pickle|*.parquet|*.woff|*.woff2|*.ttf)
-                skipped="$skipped $f"; continue ;;
-              # CSV: data files can run to hundreds of MB. A diff hunk on
-              # one is reviewable; the whole file never is.
-              *.csv) skipped="$skipped $f"; continue ;;
-            esac
-            # Budget check BEFORE fetching, and the per-file cap is clamped to
-            # what is left. Testing only `files_total -ge CAP` would let the
-            # last file through whole and overshoot by up to FILE_CAP-1 bytes,
-            # so the documented ceiling would not hold. Clamping keeps the
-            # total a hard bound (found by this workflow reviewing its own
-            # change).
-            remaining=$((FILES_TOTAL_CAP - files_total))
-            if [ "$files_n" -ge "$FILE_COUNT_CAP" ] || [ "$remaining" -le 0 ]; then
-              skipped="$skipped $f"
-              continue
-            fi
-            cap=$FILE_CAP
-            [ "$cap" -le "$remaining" ] || cap=$remaining
-            # Percent-encode each path segment but keep the slashes, so paths
-            # with spaces or unicode survive as a valid API route.
-            enc=$(printf '%s' "$f" | jq -sRr 'rtrimstr("\n") | split("/") | map(@uri) | join("/")' 2>/dev/null || true)
-            [ -n "$enc" ] || continue
-            # .size comes back with the content so the header can tell the
-            # truth. Labelling a clamped file "full content" is the same lie
-            # the 8000-byte guidance cap used to tell, and it actively
-            # manufactures false findings: hand the model the first 49 KiB of
-            # an 88 KiB module under a "full content" header and it can
-            # correctly observe that a function the diff calls is "never
-            # defined in this file".
-            fmeta=$(gh api "repos/$GH_REPO/contents/$enc?ref=$HEAD_SHA" \
-                      --jq 'select(.type=="file" and .encoding=="base64") | "\(.size)\t\(.content)"' 2>/dev/null || true)
-            [ -n "$fmeta" ] || continue
-            fsize=${fmeta%%$'\t'*}
-            printf '%s' "${fmeta#*$'\t'}" | tr -d '\n' | base64 -d 2>/dev/null \
-              | head -c "$cap" | iconv -f UTF-8 -t UTF-8 -c 2>/dev/null > fbody.txt || true
-            [ -s fbody.txt ] || continue
-            fsent=$(wc -c < fbody.txt | tr -d ' ')
-            if [ "$fsent" -lt "$fsize" ]; then
-              fhead="=== Changed file (TRUNCATED — first ${fsent} of ${fsize} bytes at PR head): $f ==="
-            else
-              fhead="=== Changed file (full content at PR head): $f ==="
-            fi
+
+          # ---- py_import_candidates ----
+          # Python import resolution, purely syntactic: there is no
+          # checkout, so nothing can be stat-ed and every guess is settled
+          # by the Contents API (a miss is one 404 and costs no attachment
+          # slot). Reads one Python file on stdin, prints candidate repository
+          # paths for the modules it imports, most certain first:
+          #   1. relative imports (from .x / from ..y import z) — in-repo by
+          #      definition, resolved against the importing file directory;
+          #   2. absolute imports whose top package is a directory component
+          #      of the importing file path (src/pkg/mod.py importing
+          #      pkg.core -> src/pkg/core.py) or of any changed path in the
+          #      PR (the file list carries the package root for free);
+          #   3. everything else that is not a well-known stdlib name, tried
+          #      at the repo root and under src/ — the tests-only PR shape
+          #      (tests/test_x.py importing pkg.core) with no other anchor.
+          # For each module both mod.py and mod/__init__.py are tried; a
+          # lower-case imported name is also tried as a submodule
+          # (from pkg import helpers -> pkg/helpers.py). The stdlib list only
+          # saves round trips: a missing entry is a wasted 404, not a bug.
+          # Names inside a parenthesized multi-line import are not seen
+          # (the module itself still is). Callers of the changed code are
+          # deliberately NOT resolved — that needs code search or a checkout.
+          # Program is single-quoted: no apostrophes inside it, comments
+          # included (tests/test_import_follow.sh asserts this).
+          py_import_candidates() { # <importing-file-path> <pr-file-list>
+            awk -v self="$1" -v listfile="$2" '
+            BEGIN {
+              nself = split(self, sc, "/")
+              dir = ""
+              for (i = 1; i < nself; i++) dir = dir sc[i] "/"
+              while ((getline line < listfile) > 0) {
+                n = split(line, pc, "/")
+                pre = ""
+                for (i = 1; i < n; i++) { if (!(pc[i] in root)) root[pc[i]] = pre; pre = pre pc[i] "/" }
+              }
+              pre = ""
+              for (i = 1; i < nself; i++) { root[sc[i]] = pre; pre = pre sc[i] "/" }
+              nstd = split("os sys re json typing pathlib asyncio logging datetime time subprocess collections functools itertools dataclasses enum io unittest argparse shutil tempfile urllib http socket ssl hashlib base64 textwrap string math random uuid contextlib abc copy struct signal threading queue csv sqlite3 decimal statistics secrets warnings traceback inspect importlib glob fnmatch configparser platform zoneinfo email mimetypes ipaddress zipfile tarfile gzip pprint operator types weakref heapq bisect codecs select selectors concurrent multiprocessing pickle html xml __future__ builtins typing_extensions", sl, " ")
+              for (i = 1; i <= nstd; i++) stdlib[sl[i]] = 1
+              nrel = 0; nanc = 0; nfb = 0
+            }
+            function add(tier, p) {
+              if (p in seen) return
+              seen[p] = 1
+              if (tier == 1) rel[++nrel] = p
+              else if (tier == 2) anc[++nanc] = p
+              else fb[++nfb] = p
+            }
+            function modpath(m) { gsub(/\./, "/", m); return m }
+            function emit_module(tier, base, names, nn,   k) {
+              add(tier, base ".py")
+              add(tier, base "/__init__.py")
+              for (k = 1; k <= nn; k++) if (names[k] ~ /^[a-z_][a-z0-9_]*$/) add(tier, base "/" names[k] ".py")
+            }
+            function emit_bare(tier, rdir, names, nn,   k) {
+              for (k = 1; k <= nn; k++) if (names[k] ~ /^[a-z_][a-z0-9_]*$/) { add(tier, rdir names[k] ".py"); add(tier, rdir names[k] "/__init__.py") }
+            }
+            function clean_names(str, names,   nn, k, m) {
+              sub(/#.*$/, "", str); gsub(/[()\\]/, "", str)
+              nn = split(str, raw, ",")
+              m = 0
+              for (k = 1; k <= nn; k++) {
+                gsub(/^[ \t]+|[ \t]+$/, "", raw[k])
+                sub(/[ \t]+as[ \t]+.*$/, "", raw[k])
+                if (raw[k] ~ /^[A-Za-z0-9_]+$/) names[++m] = raw[k]
+              }
+              return m
+            }
             {
-              echo "$fhead"
-              cat fbody.txt
-              echo
-            } >> changedfiles.txt
-            files_total=$((files_total + fsent))
-            files_n=$((files_n + 1))
-          done < attach_list.txt
+              line = $0
+              sub(/^[ \t]+/, "", line)
+              if (line ~ /^from[ \t]+[.A-Za-z0-9_]+[ \t]+import[ \t]+/) {
+                sub(/^from[ \t]+/, "", line)
+                mod = line; sub(/[ \t].*$/, "", mod)
+                sub(/^[.A-Za-z0-9_]+[ \t]+import[ \t]+/, "", line)
+                nn = clean_names(line, names)
+                if (mod ~ /^\./) {
+                  dots = 0
+                  while (substr(mod, dots + 1, 1) == ".") dots++
+                  rest = substr(mod, dots + 1)
+                  keep = (nself - 1) - (dots - 1)
+                  if (keep < 0) next
+                  rdir = ""
+                  for (i = 1; i <= keep; i++) rdir = rdir sc[i] "/"
+                  if (rest != "") emit_module(1, rdir modpath(rest), names, nn)
+                  else emit_bare(1, rdir, names, nn)
+                } else {
+                  top = mod; sub(/\..*$/, "", top)
+                  if (top in stdlib) next
+                  if (top in root) emit_module(2, root[top] modpath(mod), names, nn)
+                  else { emit_module(3, modpath(mod), names, nn); emit_module(3, "src/" modpath(mod), names, nn) }
+                }
+              } else if (line ~ /^import[ \t]+[A-Za-z0-9_.]/) {
+                sub(/^import[ \t]+/, "", line)
+                sub(/#.*$/, "", line)
+                nm = split(line, mods, ",")
+                for (j = 1; j <= nm; j++) {
+                  mod = mods[j]
+                  gsub(/^[ \t]+|[ \t]+$/, "", mod)
+                  sub(/[ \t]+as[ \t]+.*$/, "", mod)
+                  if (mod !~ /^[A-Za-z0-9_.]+$/) continue
+                  top = mod; sub(/\..*$/, "", top)
+                  if (top in stdlib) continue
+                  if (top in root) emit_module(2, root[top] modpath(mod), none, 0)
+                  else { emit_module(3, modpath(mod), none, 0); emit_module(3, "src/" modpath(mod), none, 0) }
+                }
+              }
+            }
+            END {
+              for (i = 1; i <= nrel; i++) print rel[i]
+              for (i = 1; i <= nanc; i++) print anc[i]
+              for (i = 1; i <= nfb; i++) print fb[i]
+            }'
+          }
+          # ---- end py_import_candidates ----
+
+          # One loop for both kinds of attachment, so the deny-list, the
+          # budget clamp and the honest TRUNCATED header apply to an imported
+          # file by construction — never a second copy of this logic.
+          attach_from_list() { # <list-file> <changed|imported>
+            local list=$1 kind=$2 f enc fmeta fsize fsent fhead flabel fnote cap remaining
+            while IFS= read -r f; do
+              [ -n "$f" ] || continue
+              # Three kinds of exclusion, and the first two are not about
+              # tokens.
+              #
+              # GUIDANCE: the steering files must never arrive through this
+              # path. Attaching them would defeat the base-revision rule one
+              # section up by relabelling the PR's own version from "guidance"
+              # to "changed file": both copies would sit in the prompt with
+              # nothing establishing precedence, and the head copy is the
+              # later and (if the PR grew the file) longer one. A PR could
+              # then write itself an exemption into the guidance and have the
+              # model apply it. The diff still shows the change — only the
+              # full steering text is withheld.
+              #
+              # SECRETS: attaching whole files widens exposure in a way the
+              # diff never did. A PR adding one line to a credentials file
+              # used to leak only that line through the diff hunk; sending the
+              # file would hand the model every other value in it and invite
+              # them into a public PR comment. Env-style files (some repos
+              # track one under a name like `dot.env`) and config or key
+              # material that carries credentials are excluded for the same
+              # reason. Keep this list ahead of the size caps: a secret must
+              # never be attached, however small.
+              #
+              # NOISE: lock files and minified bundles are large, mechanical
+              # and never the subject of a review finding.
+              # Pattern note: in a shell `case`, `*` crosses `/`, so pure
+              # SUFFIX patterns (*.env, *.pem, *.lock) already match at any
+              # depth. Anchored basename patterns do not: `.env.*` or
+              # `config.ini` alone would miss `apps/api/.env.production` and
+              # `deploy/config.ini`, silently attaching nested credential
+              # files (found by this workflow reviewing its own change, R1F1).
+              # Every anchored pattern therefore carries a `*/` twin. The
+              # guidance names stay root-only on purpose — those are the paths
+              # the guidance fetch reads, and a nested copy is an ordinary
+              # changed file.
+              case "$f" in
+                CLAUDE.md|AGENTS.md|.github/copilot-instructions.md|REVIEW.md)
+                  skipped="$skipped $f"; continue ;;
+                dot.env|*/dot.env|.env|*/.env|*.env|.env.*|*/.env.*) skipped="$skipped $f"; continue ;;
+                config.ini|*/config.ini|*.pem|*.key|*.p12|*.pfx|id_rsa*|*/id_rsa*|*service_account*.json)
+                  skipped="$skipped $f"; continue ;;
+                *.lock|package-lock.json|*/package-lock.json|*.min.*|*.min) skipped="$skipped $f"; continue ;;
+                # BINARY / BULK DATA: the API hands these back base64 like any
+                # other blob, so without a filter a tracked PNG or a .pickle.xz
+                # would decode into the prompt as 48 KiB of noise AND consume
+                # one of the attachment slots that a source file needed.
+                *.png|*.jpg|*.jpeg|*.gif|*.webp|*.ico|*.pdf|*.xls|*.xlsx|*.zip|*.gz|*.xz|*.bz2|*.pickle|*.parquet|*.woff|*.woff2|*.ttf)
+                  skipped="$skipped $f"; continue ;;
+                # CSV: data files can run to hundreds of MB. A diff hunk on
+                # one is reviewable; the whole file never is.
+                *.csv) skipped="$skipped $f"; continue ;;
+              esac
+              # Budget check BEFORE fetching, and the per-file cap is clamped to
+              # what is left. Testing only `files_total -ge CAP` would let the
+              # last file through whole and overshoot by up to FILE_CAP-1 bytes,
+              # so the documented ceiling would not hold. Clamping keeps the
+              # total a hard bound (found by this workflow reviewing its own
+              # change).
+              remaining=$((FILES_TOTAL_CAP - files_total - imports_total))
+              if [ $((files_n + imports_n)) -ge "$FILE_COUNT_CAP" ] || [ "$remaining" -le 0 ] \
+                 || { [ "$kind" = "imported" ] && [ "$imports_n" -ge "$IMPORT_COUNT_CAP" ]; }; then
+                skipped="$skipped $f"
+                continue
+              fi
+              cap=$FILE_CAP
+              [ "$cap" -le "$remaining" ] || cap=$remaining
+              # Percent-encode each path segment but keep the slashes, so paths
+              # with spaces or unicode survive as a valid API route.
+              enc=$(printf '%s' "$f" | jq -sRr 'rtrimstr("\n") | split("/") | map(@uri) | join("/")' 2>/dev/null || true)
+              [ -n "$enc" ] || continue
+              # .size comes back with the content so the header can tell the
+              # truth. Labelling a clamped file "full content" is the same lie
+              # the 8000-byte guidance cap used to tell, and it actively
+              # manufactures false findings: hand the model the first 49 KiB of
+              # an 88 KiB module under a "full content" header and it can
+              # correctly observe that a function the diff calls is "never
+              # defined in this file".
+              fmeta=$(gh api "repos/$GH_REPO/contents/$enc?ref=$HEAD_SHA" \
+                        --jq 'select(.type=="file" and .encoding=="base64") | "\(.size)\t\(.content)"' 2>/dev/null || true)
+              [ -n "$fmeta" ] || continue
+              fsize=${fmeta%%$'\t'*}
+              printf '%s' "${fmeta#*$'\t'}" | tr -d '\n' | base64 -d 2>/dev/null \
+                | head -c "$cap" | iconv -f UTF-8 -t UTF-8 -c 2>/dev/null > fbody.txt || true
+              [ -s fbody.txt ] || continue
+              fsent=$(wc -c < fbody.txt | tr -d ' ')
+              if [ "$kind" = "imported" ]; then
+                flabel="Imported file"
+                fnote="NOT changed by this PR, evidence only; "
+              else
+                flabel="Changed file"
+                fnote=""
+              fi
+              if [ "$fsent" -lt "$fsize" ]; then
+                fhead="=== $flabel (${fnote}TRUNCATED — first ${fsent} of ${fsize} bytes at PR head): $f ==="
+              else
+                fhead="=== $flabel (${fnote}full content at PR head): $f ==="
+              fi
+              {
+                echo "$fhead"
+                cat fbody.txt
+                echo
+              } >> changedfiles.txt
+              if [ "$kind" = "imported" ]; then
+                imports_total=$((imports_total + fsent))
+                imports_n=$((imports_n + 1))
+              else
+                files_total=$((files_total + fsent))
+                files_n=$((files_n + 1))
+                # Collect what this file imports while its text is at hand.
+                # Python only, code-mode only: docs-mode spends the budget
+                # on cited sources instead.
+                # Deliberately not a second case statement on $f: the
+                # deny-list test extracts the FIRST one, and a test also
+                # asserts there is exactly one.
+                if [ "${f%.py}" != "$f" ] && [ "$DOCS_MODE" != "1" ]; then
+                  py_import_candidates "$f" prfiles.txt < fbody.txt >> imports_raw.txt || true
+                fi
+              fi
+            done < "$list"
+          }
+          attach_from_list attach_list.txt changed
           [ -z "$skipped" ] || echo "::notice::changed files not attached (cap/deny-list):$skipped"
-          echo "::notice::ai-review context: docs_mode=${DOCS_MODE} delta_mode=${DELTA_MODE} diff=$(wc -c < fulldiff.txt | tr -d ' ')B delta=$(wc -c < delta.txt | tr -d ' ')B guidance=$(wc -c < guidance.txt | tr -d ' ')B review_override=$(wc -c < review_override.txt | tr -d ' ')B files=${files_n} (${files_total}B)"
+          # ---------- Imported files at HEAD (code-mode) ----------
+          # The changed files are the subject; the modules they import are
+          # attached after them as evidence, so a call into an unchanged
+          # callee can be checked instead of guessed at. Candidates already
+          # in the changed-file list are dropped (attached once, as subject),
+          # the rest are deduplicated in certainty order and capped like the
+          # docs-mode citations. Only the forward direction: callers of the
+          # changed code are not found this way, and the prompt says so.
+          skipped=""
+          if [ "$DOCS_MODE" != "1" ] && [ -s imports_raw.txt ]; then
+            awk '!seen[$0]++' imports_raw.txt | grep -vxFf attach_list.txt | head -40 > attach_imports.txt || true
+            attach_from_list attach_imports.txt imported
+          fi
+          [ -z "$skipped" ] || echo "::notice::imported files not attached (cap/deny-list):$skipped"
+          echo "::notice::ai-review context: docs_mode=${DOCS_MODE} delta_mode=${DELTA_MODE} diff=$(wc -c < fulldiff.txt | tr -d ' ')B delta=$(wc -c < delta.txt | tr -d ' ')B guidance=$(wc -c < guidance.txt | tr -d ' ')B review_override=$(wc -c < review_override.txt | tr -d ' ')B files=${files_n} (${files_total}B) imports=${imports_n} (${imports_total}B)"
 
           # ---------- Build the review prompt ----------
           # With no `shell:` key GitHub runs `bash -e {0}` — errexit, but NOT
@@ -1034,9 +1210,14 @@ jobs:
           The prompt may include the full current contents of the changed
           files. Use them to check code the diff does not show — a bug the
           diff introduces often lives in an unmodified function the changed
-          code calls. Anchor every finding to a line inside the report scope
-          defined below, but reason across the whole file when deciding
-          whether that line is wrong.
+          code calls. It may also include, under "Imported file" headers,
+          modules the changed files import that this PR does not change:
+          evidence for checking a call into them (a signature, a return
+          shape, a raised error), never report scope. Callers of the
+          changed code are NOT attached — the absence of a caller from this
+          prompt is not evidence that none exists. Anchor every finding to
+          a line inside the report scope defined below, but reason across
+          the whole file when deciding whether that line is wrong.
 
           Reporting bar: report a finding only if you can name the concrete
           failing input or state and the resulting wrong behavior, citing
