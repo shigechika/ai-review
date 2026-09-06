@@ -118,6 +118,11 @@ t "strings: one-line triple string does not flip state" "yes" "$(has real_one.py
 t "strings: import after the string still resolved"  "yes" "$(has real_two.py)"
 resolve src/pkg/mod.py 'from typing_extensions import Self' > /tmp/pic_out.txt
 t "stdlib list: typing_extensions is resolved (not stdlib)" "yes" "$(has typing_extensions.py)"
+# R9F1: a comment line mentioning a triple quote must not flip the
+# string state and swallow every import after it.
+resolve src/pkg/mod.py $'# see the """ docstring below\nimport after_comment\n    # indented """ too\nimport after_indented' > /tmp/pic_out.txt
+t "R9F1: import after a comment containing triple quotes" "yes" "$(has after_comment.py)"
+t "R9F1: import after an indented such comment"          "yes" "$(has after_indented.py)"
 
 # ---------- Shape details ----------
 resolve src/pkg/mod.py $'import httpx\nfrom .util import a\nfrom pkg.core import b' > /tmp/pic_out.txt
