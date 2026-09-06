@@ -208,8 +208,9 @@ set — see "pr-gate.yml invariants" below.
   second one would either be ignored or hijack the extraction — and a
   comment that merely quotes the phrase counts too, since
   `test_import_follow.sh` counts occurrences. Branch on `$f` some other
-  way (`[ "${f%.py}" != "$f" ]`). Tripped twice on PR #60 before the
-  counting assertion existed.
+  way (`[ "${f%.py}" != "$f" ]`). Caught twice by the counting
+  assertion while writing PR #60 — once for a real second block, once
+  for a comment quoting the phrase.
 - An attachment header may claim only what the engine verified. "NOT
   changed by this PR" on an imported file was false in a delta round —
   the attach list holds only the new-commit files, so a module changed

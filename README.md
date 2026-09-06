@@ -62,8 +62,10 @@ engine:
    `Imported file` header, so a call into an unchanged callee is checked
    against its real signature instead of guessed at. Resolution is
    syntactic (there is no checkout): relative imports first, then
-   absolute imports anchored on the changed paths' own package root,
-   then a repository-root / `src/` fallback for the tests-only PR shape.
+   absolute imports anchored on the changed paths' own package roots,
+   and a repository-root / `src/` fallback that is always tried behind
+   them — so a tests-only PR still finds its subject, and a `tests/pkg/`
+   package cannot hide `src/pkg/`.
    Forward direction only — callers of the changed code are not found,
    and the prompt tells the model not to read their absence as evidence.
    Same deny-list and byte budget as the changed files, plus a slot cap
