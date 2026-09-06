@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.0](https://github.com/shigechika/ai-review/compare/v1.5.1...v1.6.0) (2026-09-06)
+
+
+### Features
+
+* attach the modules the changed files import (code-mode) ([#60](https://github.com/shigechika/ai-review/issues/60)) ([188a238](https://github.com/shigechika/ai-review/commit/188a2381a52591440d5cb7cb51b7bbf280a35e1c))
+
 ## [1.5.1](https://github.com/shigechika/ai-review/compare/v1.5.0...v1.5.1) (2026-08-13)
 
 
