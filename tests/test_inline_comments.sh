@@ -85,6 +85,21 @@ t "anchor: missing separator"     ""   "$(finding_anchor 'src/a.py:12 no dash')"
 # this would split and hand an empty line number downstream.
 t "anchor: empty line number"     ""   "$(finding_anchor 'src/a.py: - bad')"
 
+# ---------- The finding id is model output ----------
+extract_between '# ---- finding_id ----' '# ---- end finding_id ----' > /tmp/ic_fi.sh
+t "finding_id block extracted"        "yes" "$([ -s /tmp/ic_fi.sh ] && echo yes || echo no)"
+t "...and defines the function"       "yes" "$(grep -qF 'finding_id() {' /tmp/ic_fi.sh && echo yes || echo no)"
+# shellcheck disable=SC1091
+. /tmp/ic_fi.sh
+t "id: plain"                         "R1F1" "$(finding_id '===FINDING R1F1===')"
+t "id: lower case is canonicalised"   "R1F1" "$(finding_id '===FINDING r1f1===')"
+t "id: multi-digit round and number"  "R12F3" "$(finding_id '===FINDING R12F3===')"
+# An id carrying --> would close the HTML comment marker early.
+t "id: closing an HTML comment"       ""     "$(finding_id '===FINDING R1F1--><b>x===')"
+t "id: wrong shape"                   ""     "$(finding_id '===FINDING FINDING1===')"
+t "id: empty"                         ""     "$(finding_id '===FINDING ===')"
+t "id: not a finding line"            ""     "$(finding_id 'severity: blocking')"
+
 # ---------- Marker extraction (a body is mostly model output) ----------
 extract_between '# ---- marker_ids ----' '# ---- end marker_ids ----' > /tmp/ic_mi.sh
 t "marker_ids block extracted"        "yes" "$([ -s /tmp/ic_mi.sh ] && echo yes || echo no)"
@@ -127,5 +142,11 @@ t "engine: an unaddressable finding is counted, not dropped silently" "yes" \
   "$(grep -qF 'not on a line GitHub accepts (kept in the sticky comment)' /tmp/ic_run.sh && echo yes || echo no)"
 t "engine: findings come from kept.txt, after the verifier" "yes" \
   "$(grep -qF 'kept.txt > blk.txt' /tmp/ic_run.sh && echo yes || echo no)"
+t "engine: the id is validated before it becomes a marker" "yes" \
+  "$(grep -qF 'id=$(finding_id "$(sed -n 1p blk.txt' /tmp/ic_run.sh && echo yes || echo no)"
+t "engine: a missing file list is reported as such, not as bad anchors" "yes" \
+  "$(grep -A2 -F 'if [ ! -s prfiles.json ]; then' /tmp/ic_run.sh | grep -qF 'the PR file list is unavailable' && echo yes || echo no)"
+t "engine: ...and that check precedes building the commentable set" "yes" \
+  "$(awk '/if \[ ! -s prfiles.json \]; then/ {a=NR} /commentable_lines > commentable.txt/ {b=NR} END {exit !(a && b && a < b)}' /tmp/ic_run.sh && echo yes || echo no)"
 
 t_summary

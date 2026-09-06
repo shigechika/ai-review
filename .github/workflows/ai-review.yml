@@ -2364,6 +2364,28 @@ jobs:
           }
           # ---- end commentable_lines ----
 
+          # ---- finding_id ----
+          # Reads the first line of a finding block and prints its id in the
+          # canonical form, or nothing when the line does not carry one.
+          #
+          # The id is MODEL OUTPUT and it is about to be embedded in an HTML
+          # comment and read back by a fixed pattern, so it is validated
+          # here rather than trusted: an id carrying --> would close the
+          # marker early, and one the model wrote in lower case would post a
+          # marker that marker_ids can never match, so the finding would be
+          # posted again on any round that reports it again (found by
+          # /code-review on PR #62). Upper-cased for the same reason the
+          # ledger matches on toupper(id) — the model is not consistent
+          # about case and both sides must agree.
+          finding_id() {
+            printf '%s\n' "$1" \
+              | sed -n -E 's/^===FINDING[[:space:]]+([RrFf0-9]+)=*[[:space:]]*$/\1/p' \
+              | grep -iE '^R[0-9]+F[0-9]+$' \
+              | tr '[:lower:]' '[:upper:]' \
+              | head -1
+          }
+          # ---- end finding_id ----
+
           # ---- marker_ids ----
           # Reads the FIRST LINE of each of our inline comment bodies and
           # prints the finding ids among them. Two narrowings, both
@@ -2402,7 +2424,7 @@ jobs:
           # ---- end finding_anchor ----
 
           post_inline_comments() {
-            local n_blocks i id anchor path line body_ok posted=0 unaddressable=0 already=0 failed=0
+            local n_blocks i id anchor path line body_ok posted=0 unaddressable=0 already=0 failed=0 malformed=0
             local icomments posted_ids istatus
             [ -s kept.txt ] || return 0
             # Author-filtered for the same reason the ledger is: anyone can
@@ -2418,6 +2440,15 @@ jobs:
               return 0
             fi
             posted_ids=$(printf '%s\n' "$icomments" | marker_ids || true)
+            # No file list, no way to tell an unaddressable line from an
+            # unknown one: every finding would be reported as "not on a line
+            # GitHub accepts", which names a model problem for what is a
+            # failed fetch. Same rule as the guidance fetch — the two must
+            # not look alike (/code-review on PR #62).
+            if [ ! -s prfiles.json ]; then
+              echo "::notice::inline comments skipped this round — the PR file list is unavailable, so no finding line could be checked against the diff"
+              return 0
+            fi
             commentable_lines > commentable.txt 2>/dev/null || : > commentable.txt
             n_blocks=$(grep -c "^===FINDING " kept.txt 2>/dev/null || true)
             case "$n_blocks" in ""|*[!0-9]*) n_blocks=0 ;; esac
@@ -2430,8 +2461,14 @@ jobs:
                 /^===END FINDING===/ { if (c == want) exit }
               ' kept.txt > blk.txt 2>/dev/null || true
               [ -s blk.txt ] || continue
-              id=$(awk 'NR == 1 { id = $2; sub(/=+$/, "", id); print id; exit }' blk.txt 2>/dev/null || true)
-              [ -n "$id" ] || continue
+              id=$(finding_id "$(sed -n 1p blk.txt 2>/dev/null || true)")
+              if [ -z "$id" ]; then
+                # A block whose id this step cannot vouch for stays in the
+                # sticky comment, where the raw id is shown as the model
+                # wrote it.
+                malformed=$((malformed + 1))
+                continue
+              fi
               if printf '%s\n' "$posted_ids" | grep -qxF "$id"; then
                 already=$((already + 1))
                 continue
@@ -2485,7 +2522,7 @@ jobs:
                 failed=$((failed + 1))
               fi
             done
-            echo "::notice::inline comments: ${posted} posted, ${already} already present, ${unaddressable} not on a line GitHub accepts (kept in the sticky comment), ${failed} failed"
+            echo "::notice::inline comments: ${posted} posted, ${already} already present, ${unaddressable} not on a line GitHub accepts (kept in the sticky comment), ${malformed} with an unusable id, ${failed} failed"
             [ "$failed" -eq 0 ] || echo "::warning::${failed} inline review comment(s) could not be posted — those findings are still in the sticky comment"
             return 0
           }

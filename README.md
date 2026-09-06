@@ -50,9 +50,10 @@ engine:
    the sticky comment lands, one API call each so one failure cannot lose
    the rest, deduplicated by a hidden marker so a finding is never posted
    twice, and skipped for a finding whose line is not part of the diff
-   (that one stays in the sticky comment). Replies to them are never
-   deleted. Needs no permission beyond the `pull-requests: write` the
-   caller template already grants.
+   (that one stays in the sticky comment). A prior inline comment is never
+   deleted — unlike the sticky comment, which is reposted each round — so a
+   reply to one survives. Needs no permission beyond the
+   `pull-requests: write` the caller template already grants.
 5. On later pushes, reviews only the **new commits** (delta rounds via the
    compare API), and **skips posting entirely** for docs-only pushes to
    code PRs or a head already reviewed, degrading safely to a full-diff
