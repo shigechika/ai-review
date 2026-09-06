@@ -81,7 +81,8 @@ engine:
    the layout fallback says so in its header: several directories can hold
    a module of the same name and Python resolves exactly one, so it is
    offered as a possible resolution rather than as the imported module.
-   Set `AI_REVIEW_DISABLE_IMPORTS` to turn the whole step off.
+   **Off by default** — set `AI_REVIEW_IMPORTS` to `true` to turn the
+   step on.
    Forward direction only — callers of the changed code are not found,
    and the prompt tells the model not to read their absence as evidence.
    Same deny-list and byte budget as the changed files, plus a slot cap
@@ -96,7 +97,7 @@ engine:
    quality and the cross-language parity check all stay out of code-mode
    (parity belongs to a documentation-only PR, item 6). Skipped when the
    round already attached that file as a changed file, and turned off
-   entirely by `AI_REVIEW_DISABLE_README`.
+   entirely by setting `AI_REVIEW_README` to `false`.
 9. Two more things the reporting bar allows, both of which name no failing
    input and so need saying explicitly: the README check above, and
    **redundancy the diff leaves behind** — a function, branch, constant or
@@ -110,7 +111,8 @@ engine:
    what they missed instead of restating them. Never waited for: a round
    that runs first simply finds none. Treated as untrusted content — framed
    as data, stripped of marker-shaped lines, capped, and withheld from the
-   verifier. Turn it off with `AI_REVIEW_DISABLE_PRIOR_REVIEW`.
+   verifier. **Off by default** — set `AI_REVIEW_PRIOR_REVIEW` to `true`
+   to turn it on.
 
 The review is **advisory only**: every failure path soft-fails, so this job
 can never block a PR.
@@ -264,14 +266,33 @@ Everything is optional. Each setting resolves as
 | `model` | `AI_REVIEW_MODEL` | `gpt-5.6-sol` | Deployment name sent to the endpoint. |
 | `reasoning-effort` | `AI_REVIEW_EFFORT` | `high` | Reviewer `reasoning_effort`. Sentinel `off` stops sending the parameter (an empty value does **not** work — it falls back to the default). |
 | — | `AI_REVIEW_VERIFY_EFFORT` | `low` | Verifier `reasoning_effort` (same `off` sentinel). |
-| — | `AI_REVIEW_DISABLE_IMPORTS` | unset | Any non-empty value stops attaching the modules the changed files import. The rest of the review is unaffected. |
-| — | `AI_REVIEW_DISABLE_README` | unset | Any non-empty value stops attaching the READMEs as documentation evidence on code PRs (see 8). |
-| — | `AI_REVIEW_DISABLE_PRIOR_REVIEW` | unset | Any non-empty value stops replaying Copilot's existing review into the prompt (see 10). |
+| — | `AI_REVIEW_IMPORTS` | `false` | `true` attaches the modules the changed files import (see 7). |
+| — | `AI_REVIEW_README` | `true` | `false` stops attaching the READMEs as documentation evidence on code PRs (see 8). |
+| — | `AI_REVIEW_PRIOR_REVIEW` | `false` | `true` replays Copilot's existing review into the prompt (see 10). |
 | `max-total-file-bytes` | — | `131072` | Combined byte budget for attached file contents: changed files first, then the modules they import. |
 
 Because a called workflow resolves `vars.*` against the **calling**
 repository, per-repo settings (e.g. `AI_REVIEW_LANG=ja`) need no input
 plumbing: set the variable on the repo and every review there picks it up.
+
+The last three switch one context source each. They take `true` or
+`false`; unset means the default in the table, and any other value logs a
+`::warning::` and uses the default — a typo must be visible rather than
+quietly leaving a feature off. Two of the three default to **off** because
+their cost is real and their value is not yet demonstrated: import
+following adds a directory listing per candidate and attaches files nobody
+put in the diff, and the prior-review replay is the only context source
+carrying prose written by a third party. README evidence defaults to on:
+it is bounded, and the evidence is written by the repository itself.
+
+> **Deprecated.** `AI_REVIEW_DISABLE_IMPORTS`, `AI_REVIEW_DISABLE_README`
+> and `AI_REVIEW_DISABLE_PRIOR_REVIEW` still force their feature off and
+> still win over the variables above, so a repository that set one keeps
+> its behaviour. They log a `::notice::` and are read until at least
+> **2026-12-06** — releases here can be under an hour apart, and a log
+> line is not a channel anyone reads on a schedule.
+> `AI_REVIEW_DISABLE_GATE` is a different thing — it belongs to
+> `pr-gate.yml` and is not affected.
 
 If the deployment rejects `reasoning_effort` with HTTP 400, the engine
 retries once without the parameter and says so in the log.
