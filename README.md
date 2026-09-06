@@ -68,7 +68,11 @@ engine:
    finds its subject, a `tests/pkg/` package cannot hide `src/pkg/`, and a
    script's `import util` finds `scripts/util.py`. Candidates are settled
    by listing each candidate directory once (not by probing paths), so
-   only files that exist compete for the slots.
+   only files that exist compete for the slots. A candidate that came from
+   the layout fallback says so in its header: several directories can hold
+   a module of the same name and Python resolves exactly one, so it is
+   offered as a possible resolution rather than as the imported module.
+   Set `AI_REVIEW_DISABLE_IMPORTS` to turn the whole step off.
    Forward direction only — callers of the changed code are not found,
    and the prompt tells the model not to read their absence as evidence.
    Same deny-list and byte budget as the changed files, plus a slot cap
@@ -224,6 +228,7 @@ Everything is optional. Each setting resolves as
 | `model` | `AI_REVIEW_MODEL` | `gpt-5.6-sol` | Deployment name sent to the endpoint. |
 | `reasoning-effort` | `AI_REVIEW_EFFORT` | `high` | Reviewer `reasoning_effort`. Sentinel `off` stops sending the parameter (an empty value does **not** work — it falls back to the default). |
 | — | `AI_REVIEW_VERIFY_EFFORT` | `low` | Verifier `reasoning_effort` (same `off` sentinel). |
+| — | `AI_REVIEW_DISABLE_IMPORTS` | unset | Any non-empty value stops attaching the modules the changed files import. The rest of the review is unaffected. |
 | `max-total-file-bytes` | — | `131072` | Combined byte budget for attached file contents: changed files first, then the modules they import. |
 
 Because a called workflow resolves `vars.*` against the **calling**

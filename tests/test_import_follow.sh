@@ -22,9 +22,13 @@ t "resolver program has no apostrophes"    "0"   "$(grep -c "'" /tmp/pic_prog.aw
 # shellcheck disable=SC1091
 . /tmp/pic_block.sh
 
+# The resolver prints <tier*10+rank>TAB<path>. Keep both views: the keyed
+# one for order/tier assertions, the path-only one for existence checks.
 resolve() { # <importing-file> <python-source>  (pr file list from /tmp/pic_prfiles.txt)
-  printf '%s\n' "$2" | py_import_candidates "$1" /tmp/pic_prfiles.txt
+  printf '%s\n' "$2" | py_import_candidates "$1" /tmp/pic_prfiles.txt > /tmp/pic_keyed.txt
+  cut -f2 /tmp/pic_keyed.txt
 }
+key_of() { grep -F "	$1" /tmp/pic_keyed.txt | head -1 | cut -f1; }
 has() { grep -qxF "$1" /tmp/pic_out.txt && echo yes || echo no; }
 
 printf 'src/pkg/mod.py\ntests/test_mod.py\n' > /tmp/pic_prfiles.txt
@@ -134,6 +138,42 @@ resolve src/pkg/mod.py $'y = \x27\x27\x27\n"""\nimport still_inside\n\x27\x27\x2
 t "R12F1: same, with the quote kinds swapped"           "no"  "$(has still_inside.py)"
 t "R12F1: ...and its own closer works"                  "yes" "$(has out.py)"
 
+# ---------- The scanner: quoting context, not delimiter counting ----------
+# Every row here was a silent total loss of the imports after it under the
+# counting versions (R9F1, R11F1, R12F1 and the code-review round).
+SQ=$(printf "\047")
+resolve src/pkg/mod.py "$(printf 'if s.startswith(%s"""%s):\n    pass\nimport after_a\n' "$SQ" "$SQ")" > /tmp/pic_out.txt
+t "scan: triple quote inside an ordinary string literal" "yes" "$(has after_a.py)"
+resolve src/pkg/mod.py 'import foo  # see """ below
+import bar' > /tmp/pic_out.txt
+t "scan: triple quote in a trailing comment, same line"  "yes" "$(has foo.py)"
+t "scan: ...and the next line still parses"              "yes" "$(has bar.py)"
+resolve src/pkg/mod.py "$(printf '"""\ndoc %s%s%s here\n"""\nimport after_d\n' "$SQ" "$SQ" "$SQ")" > /tmp/pic_out.txt
+t "scan: docstring holding the other delimiter"          "yes" "$(has after_d.py)"
+t "scan: ...and its prose is not parsed as an import"    "0"   "$(grep -c 'doc\|here' /tmp/pic_out.txt)"
+resolve src/pkg/mod.py "$(printf 'x = """a %s%s%s b"""\nimport after_e\n' "$SQ" "$SQ" "$SQ")" > /tmp/pic_out.txt
+t "scan: one-line string mixing both delimiters"         "yes" "$(has after_e.py)"
+resolve src/pkg/mod.py 'x = "a # b"
+import after_f' > /tmp/pic_out.txt
+t "scan: a hash inside a string is not a comment"        "yes" "$(has after_f.py)"
+resolve src/pkg/mod.py 'x = "unterminated
+import after_g' > /tmp/pic_out.txt
+t "scan: an unterminated one-line string does not swallow the file" "yes" "$(has after_g.py)"
+
+# ---------- CRLF (a Windows-authored file lost one import per line) ----------
+resolve src/pkg/mod.py "$(printf 'import foo\r\nimport a, b\r\nfrom .util import helper\r')" > /tmp/pic_crlf.txt
+resolve src/pkg/mod.py "$(printf 'import foo\nimport a, b\nfrom .util import helper')" > /tmp/pic_out.txt
+t "CRLF output is identical to LF"  "yes" "$(cmp -s /tmp/pic_crlf.txt /tmp/pic_out.txt && echo yes || echo no)"
+t "CRLF: the last name on a line survives" "yes" "$(grep -qxF src/pkg/util/helper.py /tmp/pic_crlf.txt && echo yes || echo no)"
+
+# ---------- The tier/rank key, which the caller sorts on ----------
+resolve src/pkg/mod.py $'from .util import a\nfrom pkg.core import b\nimport httpx' > /tmp/pic_out.txt
+t "key: relative import is tier 1"            "11" "$(key_of src/pkg/util.py)"
+t "key: anchored import is tier 2"            "21" "$(key_of src/pkg/core.py)"
+t "key: unanchored fallback is tier 3"        "31" "$(key_of httpx.py)"
+t "key: src/ fallback is the second rank"     "32" "$(key_of src/httpx.py)"
+t "key: every line carries one"               "0"  "$(grep -cv "^[1-6][1-6]	" /tmp/pic_keyed.txt)"
+
 # ---------- Shape details ----------
 resolve src/pkg/mod.py $'import httpx\nfrom .util import a\nfrom pkg.core import b' > /tmp/pic_out.txt
 t "order: relative before anchored before fallback" "src/pkg/util.py src/pkg/core.py httpx.py" \
@@ -237,6 +277,22 @@ t "engine: imported header is distinct from the changed-file header" "yes" \
   "$(grep -qF 'flabel="Imported file"' /tmp/pic_run.sh && echo yes || echo no)"
 t "engine: exactly one attachment loop (deny-list applies by construction)" "1" \
   "$(grep -c 'case "\$f" in' /tmp/pic_run.sh)"
+t "engine: candidate order is restored across files by a stable key sort" "yes" \
+  "$(grep -qF 'sort -s -k1,1n imports_raw.txt | awk -F"\t"' /tmp/pic_run.sh && echo yes || echo no)"
+t "engine: fallback-tier candidates get a separate list" "yes" \
+  "$(grep -qF 'int($1 / 10) == 3 || int($1 / 10) == 6' /tmp/pic_run.sh && echo yes || echo no)"
+t "engine: a fallback attachment says it may be the wrong module" "yes" \
+  "$(grep -qF 'grep -qxF "$f" import_fallback.txt' /tmp/pic_run.sh && echo yes || echo no)"
+t "engine: the content fetch separates failure from absence" "yes" \
+  "$(grep -qF '2>ferr.txt) || fstatus=$?' /tmp/pic_run.sh && echo yes || echo no)"
+t "engine: ...and reports the failures it counted" "yes" \
+  "$(grep -qF 'fetch_failed" -eq 0 ] || echo "::warning::' /tmp/pic_run.sh && echo yes || echo no)"
+t "engine: a failed listing is recorded, not cached as absence" "yes" \
+  "$(grep -qF 'dirs_failed.txt' /tmp/pic_run.sh && grep -A2 -F 'HTTP 404" derr.txt; then' /tmp/pic_run.sh | grep -qF 'dirs_failed.txt' && echo yes || echo no)"
+t "engine: a 1000-entry listing is treated as unproven absence" "yes" \
+  "$(grep -qF 'dirs_truncated.txt' /tmp/pic_run.sh && echo yes || echo no)"
+t "engine: import-following has a caller kill switch" "yes" \
+  "$(grep -qF 'AI_REVIEW_DISABLE_IMPORTS' "$ENGINE" && grep -qF '[ -z "${DISABLE_IMPORTS:-}" ] || imports_on=0' /tmp/pic_run.sh && echo yes || echo no)"
 t "engine: prompt tells the model callers are not attached" "yes" \
   "$(grep -qF 'Callers of the' "$ENGINE" && echo yes || echo no)"
 
@@ -260,21 +316,38 @@ t "urlenc block extracted (non-empty)" "yes" "$([ -s /tmp/urlenc_block.sh ] && e
 t "urlenc: segments encoded, slashes kept" "a%20b/c%2Bd.py" "$(urlenc_path 'a b/c+d.py')"
 GH_REPO=o/r; HEAD_SHA=deadbeef; IMPORT_DIR_CAP=25; IMPORT_DIR_TRY_CAP=50
 gh_calls=0
-gh() { # shim: canned listings per directory route, counts calls
+# The shim returns the RAW API shape and runs the engine own --jq argument
+# on it — never a hand-copied filter, which would pin the array-vs-object
+# guard by a grep instead of by behaviour (CLAUDE.md mirror-fidelity rule).
+gh() {
   gh_calls=$((gh_calls + 1)); echo "$*" >> /tmp/ief_calls.txt
+  local jqexpr="" prev="" a json
+  for a in "$@"; do
+    [ "$prev" = "--jq" ] && jqexpr=$a
+    prev=$a
+  done
   case "$*" in
-    *"contents?ref="*)            printf 'util.py\nREADME.md\n' ;;
-    *"contents/src/pkg?"*)        printf 'core.py\n__init__.py\n' ;;
-    *"contents/pkg?"*)            printf '{"type":"file","name":"pkg.py"}\n' | jq -r 'if type == "array" then .[] | select(.type == "file") | .name else empty end' ;;
-    *"contents/gone?"*)           echo "gh: Not Found (HTTP 404)" >&2; return 1 ;;
-    *"contents/broken?"*)         echo "gh: something else (HTTP 502)" >&2; return 1 ;;
-    *) return 1 ;;
+    *"contents?ref="*)     json='[{"type":"file","name":"util.py"},{"type":"dir","name":"sub"},{"type":"file","name":"README.md"}]' ;;
+    *"contents/src/pkg?"*) json='[{"type":"file","name":"core.py"},{"type":"file","name":"__init__.py"}]' ;;
+    # A candidate directory that is really a module file: the API answers
+    # with an OBJECT here, which is what the engine jq has to survive.
+    *"contents/pkg?"*)     json='{"type":"file","name":"pkg.py","encoding":"base64"}' ;;
+    # Exactly the 1000 entries the Contents API returns at most, with no
+    # flag to say it stopped there.
+    *"contents/big?"*)     json=$(jq -nc '[range(1000) | {type: "file", name: ("f" + (. | tostring) + ".py")}]') ;;
+    *"contents/gone?"*)    echo "gh: Not Found (HTTP 404)" >&2; return 1 ;;
+    *"contents/broken?"*)  echo "gh: something else (HTTP 502)" >&2; return 1 ;;
+    # An unrouted path is a directory that does not exist, which the real
+    # API answers with a 404 — not a bare failure.
+    *)                     echo "gh: Not Found (HTTP 404)" >&2; return 1 ;;
   esac
+  printf '%s' "$json" | jq -r "$jqexpr"
 }
 run_filter() { # <candidates...>  -> /tmp/ief_out.txt (file in, file out: a pipe
   # or $(...) would run the filter in a subshell and lose its counters — the
   # engine wires it the same way, for the same reason)
   : > dirs_done.txt; : > dirlist.txt; : > /tmp/ief_calls.txt
+  : > dirs_failed.txt; : > dirs_truncated.txt
   import_cands_untried=0; import_dirs_failed=0; import_dirs_listed=0; gh_calls=0
   printf '%s\n' "$@" > /tmp/ief_in.txt
   import_existing_filter < /tmp/ief_in.txt > /tmp/ief_out.txt
@@ -289,11 +362,27 @@ t "filter: order preserved"                 "util.py src/pkg/core.py src/pkg/__i
 t "filter: one API call per distinct directory" "2" "$(wc -l < /tmp/ief_calls.txt | tr -d ' ')"
 run_filter pkg/x.py pkg/y.py
 t "filter: a directory that is really a file yields nothing" "" "$out"
-t "filter: ...and is not counted as a failure" "0" "$import_dirs_failed"
+# The engine jq guards on type; without the guard jq errors on the object
+# and the shim reports a failure, which is what this pins.
+t "filter: ...and the object response is not a failure" "0" "$import_dirs_failed"
 run_filter gone/a.py
 t "filter: 404 directory yields nothing, no failure" "0" "$import_dirs_failed"
 run_filter broken/a.py broken/b.py
 t "filter: non-404 failure counted once per directory" "1" "$import_dirs_failed"
+# A failed listing proves nothing, so its candidates must be counted, not
+# silently treated as absent like a 404.
+t "filter: ...and its candidates are counted, not called absent" "2" "$import_cands_untried"
+t "filter: ...and none of them is emitted"                       ""  "$out"
+run_filter gone/a.py gone/b.py
+t "filter: a 404 directory IS absence, nothing counted"          "0" "$import_cands_untried"
+
+# A directory at the 1000-entry API ceiling cannot prove a name absent, so
+# the candidate passes through and the content fetch settles it.
+run_filter big/f1.py big/nowhere.py
+t "filter: truncated listing still resolves a listed name"   "yes" "$(printf '%s\n' "$out" | grep -qxF big/f1.py && echo yes || echo no)"
+t "filter: ...and passes an unlisted one through anyway"     "yes" "$(printf '%s\n' "$out" | grep -qxF big/nowhere.py && echo yes || echo no)"
+run_filter src/pkg/nope.py
+t "filter: a normal listing DOES prove absence"              ""    "$out"
 IMPORT_DIR_CAP=1
 run_filter util.py src/pkg/core.py src/pkg/x.py
 t "filter: past IMPORT_DIR_CAP, candidates are counted as untried" "2" "$import_cands_untried"

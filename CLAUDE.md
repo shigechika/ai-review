@@ -224,6 +224,31 @@ set — see "pr-gate.yml invariants" below.
   later and R5F1 caught it: in a delta round with an empty file list
   the engine cannot verify "unchanged", so it now says only "modules
   those files import" and, in that exact case, attaches no imports.
+- Parse Python source by SCANNING characters, never by counting
+  delimiters. Four counting variants on PR #60 (R9F1, R11F1, R12F1,
+  then `/code-review`) each left a shape — a triple quote inside an
+  ordinary string, one in a trailing comment, one delimiter kind inside
+  the other — that silently swallowed every import after it, with
+  `imports=0` looking identical to "this file imports nothing".
+  `code_of` tracks quoting context instead; a count cannot, because it
+  has no notion of being inside a string. The same block strips a
+  trailing carriage return: without it a Windows-authored file lost the
+  LAST module or name on every import line, and only that one, which is
+  why it read as working.
+- An attachment the engine cannot prove is THE imported module must not
+  be labelled as one. Root, `src/` and the importing file own directory
+  can each hold a module of the same basename; Python resolves one. A
+  fallback-tier attachment therefore says it is a possible resolution —
+  a model told `src/utils.py` IS what `tests/` imports reports real
+  methods as missing, and the verifier, reading the same label, keeps
+  the finding (`/code-review`, PR #60).
+- Candidate order is established PER FILE by the resolver, so the caller
+  must restore it across files. `imports_raw.txt` is appended once per
+  changed file; a stable sort on the emitted `tier*10+rank` key is what
+  stops an early file guesses from taking the caps, the directory budget
+  and the attachment slots from a later file relative imports. The ranks
+  are NOT vestigial after the directory-listing change — removing them
+  makes later imports vanish wholesale.
 - Settle import candidates by LISTING their directories, never by
   probing paths under a candidate cap. PR #60 spent four selftest
   rounds (R1F1, R3F1, R7F1, R8F1) re-ordering a per-path candidate
@@ -235,7 +260,13 @@ set — see "pr-gate.yml invariants" below.
   left: which real imports take the `IMPORT_COUNT_CAP` slots. The
   array-vs-object shape of the Contents API matters there (a candidate
   directory can coincide with a module file); a 404 is absence, any
-  other failure is counted and warned, never cached as absence. Two
+  other failure is counted and warned, never cached as absence, and a
+  listing of exactly 1000 entries is the API ceiling with no flag to say
+  so, so it cannot prove a name absent either — those candidates pass
+  through and the content fetch settles them. That fetch splits failure
+  from absence for the same reason: for an imported file the listing
+  already proved the path exists at that immutable SHA, so a silent drop
+  would report `imports=0` indistinguishably from having found none. Two
   earlier lessons still hold inside the resolver: an empty prefix is a
   real package root (counted arrays, R2F1), and a path first seen as a
   guess is PROMOTED when imported directly later (R3F1).
