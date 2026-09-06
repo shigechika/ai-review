@@ -24,7 +24,7 @@ engine:
    skip, checks to always run). It cannot change the fixed output format
    (finding markers, severity values, the ledger). Missing entirely, it
    is simply skipped, the same as any other guidance file.
-2. Asks the model for at most 3 findings, each with a named failing
+2. Asks the model for at most 5 findings, each with a named failing
    input/state, a severity (`blocking`/`advisory`), and a strict output
    format.
 3. Runs a second, cheap **verifier call** that tries to refute each candidate

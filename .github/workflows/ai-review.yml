@@ -895,6 +895,7 @@ jobs:
             cat attach_docs.txt >> attach_list.txt
           fi
           : > changedfiles.txt
+          : > attached.txt
           : > imports_raw.txt
           printf '%s\n' "$prfiles" > prfiles.txt
           files_total=0
@@ -1362,6 +1363,14 @@ jobs:
                 cat fbody.txt
                 echo
               } >> changedfiles.txt
+              # What actually LANDED in the prompt, which is not the same as
+              # what the list asked for: the deny-list, the count cap and
+              # the byte budget all drop entries silently by design. Read
+              # back by the README step below, where treating a listed file
+              # as an attached one left the documentation in neither place
+              # (found by this engine reviewing its own change, R1F1 on
+              # PR #64).
+              printf '%s\n' "$f" >> attached.txt
               if [ "$kind" = "imported" ]; then
                 imports_total=$((imports_total + fsent))
                 imports_n=$((imports_n + 1))
@@ -1455,14 +1464,19 @@ jobs:
           # evidence rather than the review subject.
           #
           # Skipped when the round already carries the file as a CHANGED
-          # file — attach_list.txt, the round-scoped list, not $prfiles, for
-          # the reason the bilingual-pair block above documents at length.
+          # file — and that means ATTACHED, not merely listed. A file can
+          # sit in attach_list.txt and still be missing from the prompt
+          # because the count cap, the byte budget or the deny-list dropped
+          # it; skipping on the list alone left the README in neither place
+          # (R1F1 on PR #64). attached.txt is round-scoped for the same
+          # reason attach_list.txt is, and for the reason the bilingual-pair
+          # block above documents at length: never $prfiles.
           : > readmes.txt
           readme_total=0
           readme_n=0
           if [ "$DOCS_MODE" != "1" ]; then
             for rf in README.md README.ja.md; do
-              grep -qxF "$rf" attach_list.txt && continue
+              grep -qxF "$rf" attached.txt && continue
               [ "$readme_total" -lt "$README_TOTAL_CAP" ] || continue
               rcap=$README_CAP
               rremaining=$((README_TOTAL_CAP - readme_total))

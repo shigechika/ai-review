@@ -41,9 +41,16 @@ t "reviewer labels them as evidence, not subject" "yes" \
 t "code-mode only"                       "yes" \
   "$(grep -B2 -F 'for rf in README.md README.ja.md; do' /tmp/re_run.sh | grep -qF 'if [ "$DOCS_MODE" != "1" ]; then' && echo yes || echo no)"
 t "a README already attached as a changed file is not re-sent" "yes" \
-  "$(grep -qF 'grep -qxF "$rf" attach_list.txt && continue' /tmp/re_run.sh && echo yes || echo no)"
+  "$(grep -qF 'grep -qxF "$rf" attached.txt && continue' /tmp/re_run.sh && echo yes || echo no)"
 t "...checked against the ROUND list, not the whole PR" "no" \
   "$(grep -F 'grep -qxF "$rf"' /tmp/re_run.sh | grep -qF 'prfiles' && echo yes || echo no)"
+# A file can be in attach_list.txt and still be missing from the prompt:
+# the deny-list, the count cap and the byte budget all drop entries. The
+# skip has to read what LANDED, or the README ends up in neither place.
+t "...and against what was ATTACHED, not merely listed" "no" \
+  "$(grep -F 'grep -qxF "$rf"' /tmp/re_run.sh | grep -qF 'attach_list.txt' && echo yes || echo no)"
+t "the attached list records every file that landed" "yes" \
+  "$(grep -A1 -F '} >> changedfiles.txt' /tmp/re_run.sh | grep -qF 'attached.txt' || grep -qF "printf '%s\\n' \"\$f\" >> attached.txt" /tmp/re_run.sh && echo yes || echo no)"
 t "own budget, not the changed-file pool" "yes" \
   "$(grep -qF 'README_TOTAL_CAP - readme_total' /tmp/re_run.sh && echo yes || echo no)"
 t "...and not a FILE_COUNT_CAP slot"      "no" \
@@ -60,6 +67,12 @@ t "the count is observable"               "yes" \
 # ---------- Caps tuned before REVIEW.md existed ----------
 t "both modes cap findings at the same number" "2" "$(grep -c 'Report at most 5 findings, most severe first' /tmp/re_run.sh)"
 t "no mode still says 3"                       "0" "$(grep -c 'Report at most 3 findings' /tmp/re_run.sh)"
+# The engine and the two READMEs state the same number, or this change
+# makes a documented claim false — which is the very check it adds.
+t "README.md states the same number"           "yes" \
+  "$(grep -qF 'at most 5 findings' ../README.md && echo yes || echo no)"
+t "README.ja.md states the same number"        "yes" \
+  "$(grep -qF '最大5件' ../README.ja.md && echo yes || echo no)"
 t "the PR description cap is named, not inline" "yes" \
   "$(grep -qF 'head -c "$PR_BODY_CAP"' /tmp/re_run.sh && echo yes || echo no)"
 t "...and lives in the Byte caps block" "3" \
