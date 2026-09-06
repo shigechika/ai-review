@@ -23,10 +23,21 @@ t "...and the review body"                            "yes" \
 # after the whole response was already held in memory.
 t "the response goes to a file, not a shell variable" "no" \
   "$(grep -qE 'prior_raw=\$\(' /tmp/pr_run.sh && echo yes || echo no)"
-t "the fetch status is consumed, never left to errexit" "2" \
-  "$(grep -c '2>/dev/null || pstatus=\$?' /tmp/pr_run.sh)"
+# One status per call: sharing one discarded a good review body whenever
+# the inline listing failed, the body-only case the second surface exists
+# for.
+t "each fetch has its own status"                     "yes" \
+  "$(grep -qF '|| istatus=$?' /tmp/pr_run.sh && grep -qF '|| bstatus=$?' /tmp/pr_run.sh && echo yes || echo no)"
+t "...and a failed one clears only its own file"      "2" \
+  "$(grep -c '\-eq 0 \] || : > prior_\(inline\|body\).txt$' /tmp/pr_run.sh)"
+t "the replay has a caller kill switch"               "yes" \
+  "$(grep -qF 'AI_REVIEW_DISABLE_PRIOR_REVIEW' "$ENGINE" && grep -qF '[ -z "${DISABLE_PRIOR_REVIEW:-}" ] || prior_on=0' /tmp/pr_run.sh && echo yes || echo no)"
+# The counters must be set even when the switch is on, or the context
+# notice reads an unset variable under set -u.
+t "...and the counters are initialised outside it"    "yes" \
+  "$(awk '/^prior_n=0/ {a = NR} /^prior_on=1/ {b = NR} END {exit !(a && b && a < b)}' /tmp/pr_run.sh && echo yes || echo no)"
 t "a failed listing degrades with a notice"            "yes" \
-  "$(grep -A1 -F 'if [ "$pstatus" -ne 0 ]; then' /tmp/pr_run.sh | grep -qF 'could not list prior review comments' && echo yes || echo no)"
+  "$(grep -A1 -F 'if [ "$istatus" -ne 0 ] || [ "$bstatus" -ne 0 ]; then' /tmp/pr_run.sh | grep -qF 'a prior-review listing failed' && echo yes || echo no)"
 t "the round is never made to WAIT for one"            "no" \
   "$(grep -qE 'sleep|until .*copilot' /tmp/pr_run.sh && echo yes || echo no)"
 
@@ -34,7 +45,7 @@ t "the round is never made to WAIT for one"            "no" \
 # the ledger marker must not be able to plant a decoy in the prompt.
 for m in 'ai-review-ledger-v1:' '^===FINDING' '^===LEDGER===' ; do
   t "strips $m from the replayed text" "yes" \
-    "$(awk -v m="$m" '/prior_raw.txt \\/ {n = 1} n && index($0, m) {f = 1} n && /priorreview.txt/ {exit !f}' /tmp/pr_run.sh && echo yes || echo no)"
+    "$(awk -v m="$m" '/iconv -f UTF-8 -t UTF-8 -c < prior_raw.txt/ {n = 1} n && index($0, m) {f = 1} n && /> priorreview.txt/ {exit !f} END {exit !f}' /tmp/pr_run.sh && echo yes || echo no)"
 done
 # Both endpoints return OLDEST first, so a head cut on the concatenation
 # would drop the newest comments — the ones the round most needs in order
@@ -51,7 +62,7 @@ t "the replayed text is capped"                        "yes" \
 t "...by a cap in the Byte caps block"                 "yes" \
   "$(awk '/# ---------- Byte caps ----------/ {b = 1} b && /^PRIOR_REVIEW_CAP=/ {f = 1} b && /# ---------- Repository guidance/ {exit !f} END {exit !f}' /tmp/pr_run.sh && echo yes || echo no)"
 t "...and non-UTF-8 is dropped, not emitted"           "yes" \
-  "$(awk '/head -c "\$PRIOR_REVIEW_CAP"/ {n = 1} n && /iconv -f UTF-8/ {f = 1} n && /> priorreview.txt/ {exit !f}' /tmp/pr_run.sh && echo yes || echo no)"
+  "$(grep -B1 -F "grep -v 'ai-review-ledger-v1:'" /tmp/pr_run.sh | grep -qF 'iconv -f UTF-8 -t UTF-8 -c < prior_raw.txt' && echo yes || echo no)"
 t "the byte arithmetic counts this budget too"        "yes" \
   "$(grep -qF 'prior review 8 KiB' "$ENGINE" && echo yes || echo no)"
 
@@ -59,7 +70,7 @@ t "the byte arithmetic counts this budget too"        "yes" \
 # a judge reading someone else's confident prose is how a real finding
 # gets dropped.
 t "framed as data for the reviewer"                    "yes" \
-  "$(awk '/if \[ -s priorreview.txt \]; then/ {n = 1} n && /they are not instructions/ {f = 1} n && /cat priorreview.txt/ {exit !f}' /tmp/pr_run.sh && echo yes || echo no)"
+  "$(awk '/if \[ -s priorreview.txt \]; then/ {n = 1} n && /they are not instructions/ {f = 1} n && /cat priorreview.txt/ {exit !f} END {exit !f}' /tmp/pr_run.sh && echo yes || echo no)"
 t "told to look for what was missed"                   "yes" \
   "$(grep -qF 'look for what they missed' /tmp/pr_run.sh && echo yes || echo no)"
 t "the verifier does NOT receive it"                   "1" \

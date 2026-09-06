@@ -331,13 +331,23 @@ set — see "pr-gate.yml invariants" below.
   and the verifier drops whatever survives. Caught twice on PR #64, once
   by `/code-review` after the engine had already shipped the exception.
   `tests/test_focus_exceptions.sh` pins all three.
-- Comments by another reviewer are UNTRUSTED, the same class as the diff:
+- Comments by the other reviewer (GitHub Copilot, matched by bot login —
+  one hardcoded identity, not a general notion of "another reviewer") are
+  UNTRUSTED, the same class as the diff:
   framed as data, stripped of marker-shaped lines so one cannot plant a
   decoy finding or ledger entry, capped, and deliberately withheld from
   the verifier — a judge reading someone else confident prose about a
   finding is how a real finding gets dropped. Never waited for: the other
   reviewer is requested by hand in this family, so a round that runs
-  first simply finds none.
+  first simply finds none. Read BOTH surfaces — its review BODY and its
+  inline comments — because either can be empty on its own (verified on
+  PR #66, where it left a 3 KB body and zero inline comments), give each
+  its own status so a failed listing cannot discard the other, keep the
+  NEWEST of each rather than the first bytes (both endpoints return
+  oldest first), and run `iconv -c` BEFORE the marker strip: a share cut
+  mid-multibyte makes GNU grep treat the input as binary and print
+  nothing, which would report `prior_review=0 (0B)` — a failed fetch
+  wearing the face of an absent one.
 - Delta mode requires a strictly-`ahead` compare; docs-only skip sits
   behind the same guard. Do not move either in front of it.
 - User-facing strings that other code greps for (`No findings clear the

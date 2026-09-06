@@ -104,11 +104,13 @@ engine:
    makes unreachable. Both sides must be cited; duplication that cannot be
    pointed at inside the prompt is not reportable, because the prompt holds
    the changed files and what they import, never the whole repository.
-10. If **another reviewer has already commented** on the PR, their comments
-   are replayed to the model as data, so it looks for what they missed
-   instead of restating them. Never waited for: a round that runs first
-   simply finds none. Treated as untrusted content — framed as data,
-   stripped of marker-shaped lines, capped, and withheld from the verifier.
+10. If **GitHub Copilot's code review** has already commented on the PR
+   (that one reviewer, matched by its bot login), both its inline comments
+   and its review body are replayed to the model as data, so it looks for
+   what they missed instead of restating them. Never waited for: a round
+   that runs first simply finds none. Treated as untrusted content — framed
+   as data, stripped of marker-shaped lines, capped, and withheld from the
+   verifier. Turn it off with `AI_REVIEW_DISABLE_PRIOR_REVIEW`.
 
 The review is **advisory only**: every failure path soft-fails, so this job
 can never block a PR.
@@ -264,6 +266,7 @@ Everything is optional. Each setting resolves as
 | — | `AI_REVIEW_VERIFY_EFFORT` | `low` | Verifier `reasoning_effort` (same `off` sentinel). |
 | — | `AI_REVIEW_DISABLE_IMPORTS` | unset | Any non-empty value stops attaching the modules the changed files import. The rest of the review is unaffected. |
 | — | `AI_REVIEW_DISABLE_README` | unset | Any non-empty value stops attaching the READMEs as documentation evidence on code PRs (see 8). |
+| — | `AI_REVIEW_DISABLE_PRIOR_REVIEW` | unset | Any non-empty value stops replaying Copilot's existing review into the prompt (see 10). |
 | `max-total-file-bytes` | — | `131072` | Combined byte budget for attached file contents: changed files first, then the modules they import. |
 
 Because a called workflow resolves `vars.*` against the **calling**
