@@ -89,6 +89,17 @@ t "...and both READMEs document that switch" "yes" \
   "$(grep -qF 'AI_REVIEW_DISABLE_README' ../README.md && grep -qF 'AI_REVIEW_DISABLE_README' ../README.ja.md && echo yes || echo no)"
 t "the verifier frames the README independently of the changed files" "yes" \
   "$(awk '/if \[ -s readmes.txt \]; then/ {n++} n == 2 && /never/ {found = 1} END {exit !found}' /tmp/re_run.sh && echo yes || echo no)"
+# The fallback loop runs precisely when the changed-file path did NOT
+# attach the file, which includes a README the PR edited and a cap
+# dropped — so no framing may claim it is not PR-authored.
+t "...without claiming provenance it has not verified" "no" \
+  "$(grep -qF 'not authored by this' /tmp/re_run.sh && echo yes || echo no)"
+# Item 7 documents caps that do not apply to item 8, so the trailing
+# paragraphs of 7 must stay with 7.
+t "README item 8 does not absorb item 7 tail (en)" "no" \
+  "$(awk '/^8\. For a \*\*code PR\*\*/ {n=1} n && /slot cap/ {f=1} END {exit !f}' ../README.md && echo yes || echo no)"
+t "README item 8 does not absorb item 7 tail (ja)" "no" \
+  "$(awk '/^8\. \*\*コードのPR\*\*/ {n=1} n && /専用のスロット上限/ {f=1} END {exit !f}' ../README.ja.md && echo yes || echo no)"
 t "the carve-out says which line to anchor on" "yes" \
   "$(grep -qF 'ANCHOR it on the diff line' /tmp/re_run.sh && echo yes || echo no)"
 

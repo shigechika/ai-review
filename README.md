@@ -82,9 +82,14 @@ engine:
    a module of the same name and Python resolves exactly one, so it is
    offered as a possible resolution rather than as the imported module.
    Set `AI_REVIEW_DISABLE_IMPORTS` to turn the whole step off.
+   Forward direction only — callers of the changed code are not found,
+   and the prompt tells the model not to read their absence as evidence.
+   Same deny-list and byte budget as the changed files, plus a slot cap
+   of their own (6).
 8. For a **code PR**, the root `README.md` and `README.ja.md` are attached
-   at HEAD as documentation evidence, under their own byte budget, and the
-   reporting bar gains exactly one exception to its documentation
+   at HEAD as documentation evidence, under a byte budget of their own —
+   not the changed-file budget of item 7, and not a slot in its count cap.
+   The reporting bar gains exactly one exception to its documentation
    exclusion: a concrete claim in an attached README that **this diff**
    makes false, anchored on the diff line and naming the README line. It is
    not a documentation review — pre-existing drift, incompleteness, prose
@@ -92,10 +97,6 @@ engine:
    (parity belongs to a documentation-only PR, item 6). Skipped when the
    round already attached that file as a changed file, and turned off
    entirely by `AI_REVIEW_DISABLE_README`.
-   Forward direction only — callers of the changed code are not found,
-   and the prompt tells the model not to read their absence as evidence.
-   Same deny-list and byte budget as the changed files, plus a slot cap
-   of their own (6).
 
 The review is **advisory only**: every failure path soft-fails, so this job
 can never block a PR.
