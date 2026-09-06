@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.9.1](https://github.com/shigechika/ai-review/compare/v1.9.0...v1.9.1) (2026-09-06)
+
+
+### Bug Fixes
+
+* make import following and prior-review replay opt-in ([#69](https://github.com/shigechika/ai-review/issues/69)) ([92b71b7](https://github.com/shigechika/ai-review/commit/92b71b7470942232ffa9e2268cbbbf35b6d0e5a8))
+
 ## [1.9.0](https://github.com/shigechika/ai-review/compare/v1.8.0...v1.9.0) (2026-09-06)
 
 
