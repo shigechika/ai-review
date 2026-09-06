@@ -159,6 +159,11 @@ t "scan: a hash inside a string is not a comment"        "yes" "$(has after_f.py
 resolve src/pkg/mod.py 'x = "unterminated
 import after_g' > /tmp/pic_out.txt
 t "scan: an unterminated one-line string does not swallow the file" "yes" "$(has after_g.py)"
+# A backslash at the end of the line continues the string, so what looks
+# like an import on the next physical line is still string content.
+resolve src/pkg/mod.py "$(printf 's = "text\\\nimport billing"\nimport after_h\n')" > /tmp/pic_out.txt
+t "scan: a continued string is not parsed as code"   "no"  "$(has billing.py)"
+t "scan: ...and the line after it still is"          "yes" "$(has after_h.py)"
 
 # ---------- CRLF (a Windows-authored file lost one import per line) ----------
 resolve src/pkg/mod.py "$(printf 'import foo\r\nimport a, b\r\nfrom .util import helper\r')" > /tmp/pic_crlf.txt

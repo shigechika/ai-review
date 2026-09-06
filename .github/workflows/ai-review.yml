@@ -1013,14 +1013,15 @@ jobs:
             # notion of being inside a string; scanning does. \047 is the
             # apostrophe, which this single-quoted program cannot contain
             # literally.
-            function code_of(s,   out, i, n, c, three) {
+            function code_of(s,   out, i, n, c, three, cont) {
               out = ""
               n = length(s)
               i = 1
+              cont = 0
               while (i <= n) {
                 c = substr(s, i, 1)
                 if (instr) {
-                  if (c == "\\") { i += 2; continue }
+                  if (c == "\\") { if (i + 1 > n) cont = 1; i += 2; continue }
                   if (substr(s, i, dlen) == delim) { instr = 0; i += dlen; continue }
                   i++
                   continue
@@ -1032,10 +1033,14 @@ jobs:
                 out = out c
                 i++
               }
-              # A single-quoted literal cannot span lines. An unterminated
-              # one is a syntax error in the file under review, not a reason
-              # to treat the rest of that file as prose.
-              if (instr && dlen == 1) instr = 0
+              # A single-quoted literal cannot span lines UNLESS the line
+              # ends in a backslash, which continues it: clearing the state
+              # there would parse the continuation as code and invent an
+              # import out of string contents (R13F1 on PR #60). An
+              # unterminated one with no continuation is a syntax error in
+              # the file under review, not a reason to treat the rest of
+              # that file as prose.
+              if (instr && dlen == 1 && !cont) instr = 0
               return out
             }
             {
