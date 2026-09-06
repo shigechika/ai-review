@@ -52,10 +52,16 @@ t "False is accepted"                           "on=0 rc=0 "  "$(sw False '' 1)"
 # ---- a typo must be LOUD, not silently default ----
 # The failure this closes: a maintainer sets `ture`, sees no complaint,
 # and believes the feature is running for weeks while it never does.
-t "a typo warns and keeps the default (on)"     "on=1"        "$(sw ture '' 1 | cut -d' ' -f1)"
+#
+# Every case below keeps `rc=0` in the compared value, warning and
+# deprecation paths included. The run block is `bash -e`: a branch that
+# logged and then returned 1 would take the whole job down and BLOCK the
+# PR, breaking the advisory contract, while an assertion that cut the
+# status off after the state still passed (codex review of this commit).
+t "a typo warns and keeps the default (on)"     "on=1 rc=0"   "$(sw ture '' 1 | cut -d' ' -f1,2)"
 t "...and the warning actually fires"           "yes" \
   "$(case "$(sw ture '' 1)" in *"::warning::vars.AI_REVIEW_TESTFEAT"*) echo yes ;; *) echo no ;; esac)"
-t "a typo keeps the default the other way too"  "on=0"        "$(sw ture '' 0 | cut -d' ' -f1)"
+t "a typo keeps the default the other way too"  "on=0 rc=0"   "$(sw ture '' 0 | cut -d' ' -f1,2)"
 
 # A repository variable is caller-controlled text reaching a log line
 # that GitHub parses for workflow commands — the same hazard class as
@@ -64,10 +70,10 @@ t "the warning never echoes the value back"     "yes" \
   "$(case "$(sw '::error::pwned' '' 1)" in *'::error::pwned'*) echo no ;; *) echo yes ;; esac)"
 
 # ---- deprecated predecessors, one release only ----
-t "a legacy DISABLE_ value forces off"          "on=0"        "$(sw '' 1 1 | cut -d' ' -f1)"
+t "a legacy DISABLE_ value forces off"          "on=0 rc=0"   "$(sw '' 1 1 | cut -d' ' -f1,2)"
 # Precedence is the point: a repo that set the old variable keeps its
 # behaviour even if someone later adds the new one saying otherwise.
-t "...and it beats an explicit new true"        "on=0"        "$(sw true 1 1 | cut -d' ' -f1)"
+t "...and it beats an explicit new true"        "on=0 rc=0"   "$(sw true 1 1 | cut -d' ' -f1,2)"
 t "...and says what to use instead"             "yes" \
   "$(case "$(sw '' 1 1)" in *'::notice::vars.AI_REVIEW_DISABLE_TESTFEAT is deprecated'*'AI_REVIEW_TESTFEAT=false'*) echo yes ;; *) echo no ;; esac)"
 
