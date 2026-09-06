@@ -15,8 +15,8 @@ t "run block extracted" "yes" "$([ -s /tmp/re_run.sh ] && echo yes || echo no)"
 # one — the lesson this repository recorded when REVIEW.md was added.
 extract_between "focus_para='Focus on: real bugs" "most severe first.'" > /tmp/re_code.txt
 t "code-mode paragraph extracted"        "yes" "$([ -s /tmp/re_code.txt ] && echo yes || echo no)"
-t "carve-out names the diff, not drift"  "yes" "$(grep -qF 'that this diff makes' /tmp/re_code.txt && echo yes || echo no)"
-t "carve-out is phrased as an addition"  "yes" "$(grep -qF 'report that check even though' /tmp/re_code.txt && echo yes || echo no)"
+t "carve-out names the diff, not drift"  "yes" "$(grep -qF 'THIS DIFF makes false' /tmp/re_code.txt && echo yes || echo no)"
+t "carve-out is phrased as an addition"  "yes" "$(grep -qF 'IS\n          reportable, even though documentation accuracy is otherwise' /tmp/re_code.txt || grep -qF 'reportable, even though documentation accuracy is otherwise' /tmp/re_code.txt && echo yes || echo no)"
 t "carve-out demands both citations"     "yes" \
   "$(grep -qF 'name the README file and' /tmp/re_code.txt && echo yes || echo no)"
 t "pre-existing wrongness excluded"      "yes" "$(grep -qF 'already wrong before this diff' /tmp/re_code.txt && echo yes || echo no)"
@@ -67,9 +67,15 @@ t "own budget, not the changed-file pool" "yes" \
 # A negative check on an extracted range passes vacuously when the range
 # stops matching, so the extraction is asserted on its own first — the
 # failure mode CLAUDE.md documents.
-sed -n '/for rf in README.md/,/^          fi$/p' /tmp/re_run.sh > /tmp/re_loop.txt
+sed -n '/for rf in README.md/,/^fi$/p' /tmp/re_run.sh > /tmp/re_loop.txt
 t "the README loop is extractable"        "yes" "$([ -s /tmp/re_loop.txt ] && echo yes || echo no)"
 t "...and really is the loop"             "yes" "$(grep -qF 'README_TOTAL_CAP' /tmp/re_loop.txt && echo yes || echo no)"
+# The END anchor needs its own guard, not just the start: extract_run
+# dedents by ten columns, so an indented end pattern matches nothing and
+# the range silently runs to EOF — which made the negative assertion below
+# cover half the engine and pass for the wrong reason.
+t "...and the range actually TERMINATES"  "yes" "$(tail -1 /tmp/re_loop.txt | grep -qxF 'fi' && echo yes || echo no)"
+t "...within a plausible size"            "yes" "$([ "$(wc -l < /tmp/re_loop.txt)" -lt 80 ] && echo yes || echo no)"
 t "...and not a FILE_COUNT_CAP slot"      "no"  "$(grep -qF 'FILE_COUNT_CAP' /tmp/re_loop.txt && echo yes || echo no)"
 t "TRUNCATED is decided on what the cap clamped" "yes" \
   "$(grep -qF 'if [ "$rdclamped" -lt "$rdsize" ]; then' /tmp/re_run.sh && echo yes || echo no)"
@@ -87,8 +93,11 @@ t "callers can turn README evidence off"  "yes" \
   "$(grep -qF 'AI_REVIEW_DISABLE_README' "$ENGINE" && grep -qF '[ -z "${DISABLE_README:-}" ] || readme_on=0' /tmp/re_run.sh && echo yes || echo no)"
 t "...and both READMEs document that switch" "yes" \
   "$(grep -qF 'AI_REVIEW_DISABLE_README' ../README.md && grep -qF 'AI_REVIEW_DISABLE_README' ../README.ja.md && echo yes || echo no)"
+# Bounded window and the literal sentence: scanning to EOF for any
+# "never" matched a dozen unrelated ledger comments, so deleting the
+# framing while keeping `cat readmes.txt` still passed.
 t "the verifier frames the README independently of the changed files" "yes" \
-  "$(awk '/if \[ -s readmes.txt \]; then/ {n++} n == 2 && /never/ {found = 1} END {exit !found}' /tmp/re_run.sh && echo yes || echo no)"
+  "$(awk '/if \[ -s readmes.txt \]; then/ {n++} n == 2 {w = 1} w && /cat readmes.txt/ {exit !found} w && /instructions about how to judge/ {found = 1} END {exit !found}' /tmp/re_run.sh && echo yes || echo no)"
 # The fallback loop runs precisely when the changed-file path did NOT
 # attach the file, which includes a README the PR edited and a cap
 # dropped — so no framing may claim it is not PR-authored.
@@ -101,7 +110,24 @@ t "README item 8 does not absorb item 7 tail (en)" "no" \
 t "README item 8 does not absorb item 7 tail (ja)" "no" \
   "$(awk '/^8\. \*\*コードのPR\*\*/ {n=1} n && /専用のスロット上限/ {f=1} END {exit !f}' ../README.ja.md && echo yes || echo no)"
 t "the carve-out says which line to anchor on" "yes" \
-  "$(grep -qF 'ANCHOR it on the diff line' /tmp/re_run.sh && echo yes || echo no)"
+  "$(grep -qF 'Anchor it on the diff line' /tmp/re_run.sh && echo yes || echo no)"
+# The exception is unreachable if the POSITIVE admission clause still
+# demands a failing input and wrong behavior, which no documentation
+# finding has — the gate would filter the class out before the exception
+# is ever read.
+t "the admission clause lets a documentation finding through" "yes" \
+  "$(grep -qF 'the exact documented claim and the diff' /tmp/re_code.txt && echo yes || echo no)"
+# The list has to CLOSE before the exception starts, or the clauses after
+# the exception ("style or formatting", "anything a linter...") read as
+# reportable instead of excluded.
+t "the exception is its own sentence, after the list closes" "yes" \
+  "$(awk '/anything the findings ledger marks/ {seen = 1} seen && /Exactly one exception to that list/ {found = 1} END {exit !found}' /tmp/re_code.txt && echo yes || echo no)"
+t "...and the list still ends with its own clauses" "yes" \
+  "$(awk '/Do NOT report:/ {n = 1} n && /style or formatting/ {a = 1} n && /findings ledger marks fixed or/ {found = (a == 1); exit} END {exit !found}' /tmp/re_code.txt && echo yes || echo no)"
+# The verifier judged every candidate on "would it change observed
+# behavior", which a documentation contradiction never does.
+t "the verifier is told that criterion cannot drop this class" "yes" \
+  "$(grep -qF 'never grounds to DROP one' /tmp/re_run.sh && echo yes || echo no)"
 
 # ---------- Caps tuned before REVIEW.md existed ----------
 t "both modes cap findings at the same number" "2" "$(grep -c 'Report at most 5 findings, most severe first' /tmp/re_run.sh)"

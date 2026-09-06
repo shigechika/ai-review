@@ -1681,18 +1681,25 @@ jobs:
 
           Reporting bar: report a finding only if you can name the concrete
           failing input or state and the resulting wrong behavior, citing
-          file and line from the diff. Do NOT report: pre-existing issues on
-          lines the diff does not modify; documentation or comment accuracy,
-          except a concrete claim in an attached README that this diff makes
-          false — report that check even though documentation accuracy is
-          otherwise excluded here. ANCHOR it on the diff line that falsifies
-          the claim, not on the README line, and name the README file and
-          line in the finding text; style or formatting; anything a linter, typechecker or test suite
+          file and line from the diff — or, for the single documentation
+          check described above, the exact documented claim and the diff
+          line that falsifies it. Do NOT report: pre-existing issues on
+          lines the diff does not modify; documentation or comment accuracy;
+          style or formatting; anything a linter, typechecker or test suite
           already catches; a speculative scenario that requires a
           non-compliant peer or component, unless you name the concrete
           malformed input; anything the findings ledger marks fixed or
-          dismissed. Prefer missing a borderline issue over reporting a
-          speculative one. Report at most 5 findings, most severe first.'
+          dismissed.
+
+          Exactly one exception to that list, and nothing else: a concrete
+          claim in an attached README that THIS DIFF makes false IS
+          reportable, even though documentation accuracy is otherwise
+          excluded above. Anchor it on the diff line that falsifies the
+          claim, not on the README line, and name the README file and line
+          in the finding text.
+
+          Prefer missing a borderline issue over reporting a speculative
+          one. Report at most 5 findings, most severe first.'
           fi
 
           # REVIEW.md, if present, is spliced in via a bash VARIABLE
@@ -1911,7 +1918,12 @@ jobs:
             vsystem='You are a skeptical verifier of candidate code-review findings.
           Judge each candidate against the diff: can it be refuted? Does
           the cited evidence actually support it? Would the concern change
-          observed behavior? Output exactly one line per candidate id and
+          observed behavior — or, for a finding that a documented claim in
+          an attached README is now false, is the claim really stated there
+          and really falsified by this diff? A documentation-contradiction
+          finding changes no runtime behavior by definition, so that
+          question alone is never grounds to DROP one. Output exactly one
+          line per candidate id and
           nothing else, no formatting or bold:
           <id>: KEEP - <short reason>
           <id>: DROP - <short reason>
