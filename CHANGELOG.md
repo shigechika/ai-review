@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.8.0](https://github.com/shigechika/ai-review/compare/v1.7.0...v1.8.0) (2026-09-06)
+
+
+### Features
+
+* check the README against the diff in code-mode, and lift two stale caps ([#64](https://github.com/shigechika/ai-review/issues/64)) ([e4a800b](https://github.com/shigechika/ai-review/commit/e4a800b0e0f70b0d1ab0689c4d74b1a2804da9e7))
+
 ## [1.7.0](https://github.com/shigechika/ai-review/compare/v1.6.0...v1.7.0) (2026-09-06)
 
 
