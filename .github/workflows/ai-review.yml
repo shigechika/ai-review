@@ -876,7 +876,10 @@ jobs:
           # tier-major (relative, anchored, fallback, then the name guesses
           # of each), and within a tier BREADTH-FIRST across imports by
           # variant: every import as mod.py, then every import as
-          # src/mod.py, then the two __init__.py forms — so the candidate
+          # src/mod.py, then as <own dir>/mod.py, then the three
+          # __init__.py forms in the same order (six ranks; giving the
+          # own-dir variant the same rank as the root one pushed src/m.py
+          # past the cap with 14 imports — R7F1 on PR #60) — so the candidate
           # cap below cuts the least likely variant of every import, never
           # the tenth import wholesale (depth-first, four candidates per
           # import filled 40 with ten imports and dropped the rest — the
@@ -908,7 +911,7 @@ jobs:
               }
               nstd = split("os sys re json typing pathlib asyncio logging datetime time subprocess collections functools itertools dataclasses enum io unittest argparse shutil tempfile urllib http socket ssl hashlib base64 textwrap string math random uuid contextlib abc copy struct signal threading queue csv sqlite3 decimal statistics secrets warnings traceback inspect importlib glob fnmatch configparser platform zoneinfo email mimetypes ipaddress zipfile tarfile gzip pprint operator types weakref heapq bisect codecs select selectors concurrent multiprocessing pickle html xml __future__ builtins typing_extensions", sl, " ")
               for (i = 1; i <= nstd; i++) stdlib[sl[i]] = 1
-              for (i = 1; i <= 6; i++) for (k = 1; k <= 4; k++) cnt[i, k] = 0
+              for (i = 1; i <= 6; i++) for (k = 1; k <= 6; k++) cnt[i, k] = 0
             }
             function addroot(name, pre,   k) {
               for (k = 1; k <= nroots[name]; k++) if (rootpre[name, k] == pre) return
@@ -923,8 +926,8 @@ jobs:
             function modpath(m) { gsub(/\./, "/", m); return m }
             function emit_module(tier, rank, base, names, nn,   k) {
               add(tier, rank, base ".py")
-              add(tier, rank + 2, base "/__init__.py")
-              for (k = 1; k <= nn; k++) if (names[k] ~ /^[a-z_][a-z0-9_]*$/) { add(tier + 3, rank, base "/" names[k] ".py"); add(tier + 3, rank + 2, base "/" names[k] "/__init__.py") }
+              add(tier, rank + 3, base "/__init__.py")
+              for (k = 1; k <= nn; k++) if (names[k] ~ /^[a-z_][a-z0-9_]*$/) { add(tier + 3, rank, base "/" names[k] ".py"); add(tier + 3, rank + 3, base "/" names[k] "/__init__.py") }
             }
             function emit_absolute(mod, names, nn,   top, k) {
               top = mod; sub(/\..*$/, "", top)
@@ -932,10 +935,10 @@ jobs:
               for (k = 1; k <= nroots[top]; k++) emit_module(2, 1, rootpre[top, k] modpath(mod), names, nn)
               emit_module(3, 1, modpath(mod), names, nn)
               emit_module(3, 2, "src/" modpath(mod), names, nn)
-              if (dir != "") emit_module(3, 1, dir modpath(mod), names, nn)
+              if (dir != "") emit_module(3, 3, dir modpath(mod), names, nn)
             }
             function emit_bare(tier, rdir, names, nn,   k) {
-              for (k = 1; k <= nn; k++) if (names[k] ~ /^[a-z_][a-z0-9_]*$/) { add(tier, 1, rdir names[k] ".py"); add(tier, 3, rdir names[k] "/__init__.py") }
+              for (k = 1; k <= nn; k++) if (names[k] ~ /^[a-z_][a-z0-9_]*$/) { add(tier, 1, rdir names[k] ".py"); add(tier, 4, rdir names[k] "/__init__.py") }
             }
             function clean_names(str, names,   nn, k, m) {
               sub(/#.*$/, "", str); gsub(/[()\\]/, "", str)
@@ -981,7 +984,7 @@ jobs:
               }
             }
             END {
-              for (i = 1; i <= 6; i++) for (r = 1; r <= 4; r++) for (k = 1; k <= cnt[i, r]; k++) if (best[out[i, r, k]] == i * 10 + r) print out[i, r, k]
+              for (i = 1; i <= 6; i++) for (r = 1; r <= 6; r++) for (k = 1; k <= cnt[i, r]; k++) if (best[out[i, r, k]] == i * 10 + r) print out[i, r, k]
             }'
           }
           # ---- end py_import_candidates ----

@@ -92,8 +92,18 @@ printf 'scripts/main.py\n' > /tmp/pic_prfiles.txt
 resolve scripts/main.py 'import util' > /tmp/pic_out.txt
 t "script dir: importing file directory tried"  "yes" "$(has scripts/util.py)"
 t "script dir: repo root still tried"            "yes" "$(has util.py)"
-t "script dir: both in the first rank"           "yes" \
-  "$([ "$(grep -nxF scripts/util.py /tmp/pic_out.txt | cut -d: -f1)" -lt "$(grep -nxF src/util.py /tmp/pic_out.txt | cut -d: -f1)" ] && echo yes || echo no)"
+t "script dir: after src/, before any __init__"  "yes" \
+  "$([ "$(grep -nxF src/util.py /tmp/pic_out.txt | cut -d: -f1)" -lt "$(grep -nxF scripts/util.py /tmp/pic_out.txt | cut -d: -f1)" ] && [ "$(grep -nxF scripts/util.py /tmp/pic_out.txt | cut -d: -f1)" -lt "$(grep -nxF util/__init__.py /tmp/pic_out.txt | cut -d: -f1)" ] && echo yes || echo no)"
+# R7F1: with the own-dir variant in its own rank, 14 imports from
+# tests/test_mod.py still get every src/ module inside the 40-entry cap.
+src=''
+for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14; do src="$src"$'\n'"import m$i"; done
+printf 'tests/test_mod.py\n' > /tmp/pic_prfiles.txt
+resolve tests/test_mod.py "$src" > /tmp/pic_out.txt
+t "R7F1: src/m13.py within the cap with 14 imports" "yes" \
+  "$([ "$(grep -nxF src/m13.py /tmp/pic_out.txt | cut -d: -f1)" -le 40 ] && echo yes || echo no)"
+t "R7F1: all 14 src/ modules precede the first own-dir variant" "yes" \
+  "$([ "$(grep -nxF src/m14.py /tmp/pic_out.txt | cut -d: -f1)" -lt "$(grep -nxF tests/m1.py /tmp/pic_out.txt | cut -d: -f1)" ] && echo yes || echo no)"
 resolve main.py 'import util' > /tmp/pic_out.txt
 t "script dir: root file adds no duplicate"      "1"   "$(grep -cxF util.py /tmp/pic_out.txt)"
 printf 'src/pkg/mod.py\ntests/test_mod.py\n' > /tmp/pic_prfiles.txt
