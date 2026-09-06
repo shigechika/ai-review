@@ -135,8 +135,9 @@ name: AI review
 #     AI_REVIEW_PRIOR_REVIEW  true|false, default false — replay another
 #                             reviewer comments into the prompt
 #   Each reads unset as its default and warns on any other value. The
-#   AI_REVIEW_DISABLE_* forms of these three are deprecated: still read
-#   for one release, still forcing the feature off, removed next release.
+#   AI_REVIEW_DISABLE_* forms of these three are deprecated: still read,
+#   still forcing the feature off, and still OVERRIDING the variable
+#   above while set. Removed no earlier than 2026-12-06 (issue #68).
 #   The effort settings take the sentinel "off" to stop sending
 #   reasoning_effort at all. An empty value does NOT work as an off switch —
 #   `||` treats it as falsy and falls back to the default.
@@ -230,14 +231,15 @@ jobs:
           FEATURE_IMPORTS: ${{ vars.AI_REVIEW_IMPORTS }}
           FEATURE_README: ${{ vars.AI_REVIEW_README }}
           FEATURE_PRIOR_REVIEW: ${{ vars.AI_REVIEW_PRIOR_REVIEW }}
-          # Deprecated predecessors, read for one release so a repository
-          # that already set one does not silently change behaviour under
-          # the moving v1 tag. Any non-empty value still forces the feature
-          # off and wins over the variable above. Removed in the next
-          # release. Kept until at least 2026-12-06, not merely until the
-          # next release: releases here can be under an hour apart, and a
-          # ::notice:: in a job log is not a channel anyone reads on a
-          # schedule. The workflow cannot enumerate its callers to check
+          # Deprecated predecessors, still read so a repository that
+          # already set one does not silently change behaviour under the
+          # moving v1 tag. Any non-empty value still forces the feature
+          # off and wins over the variable above.
+          #
+          # Removed no earlier than 2026-12-06 — a calendar date, not
+          # "the next release": releases here can be under an hour apart,
+          # and a ::notice:: in a job log is not a channel anyone reads on
+          # a schedule. The workflow cannot enumerate its callers to check
           # who still sets one, which argues for a LONGER window, not a
           # shorter one (codex). Tracked in issue #68.
           DISABLE_IMPORTS: ${{ vars.AI_REVIEW_DISABLE_IMPORTS }}
@@ -585,7 +587,7 @@ jobs:
             if [ -n "$3" ]; then
               FEATURE_ON=0
               FEATURE_HINT="remove the deprecated vars.AI_REVIEW_DISABLE_$1, which overrides vars.AI_REVIEW_$1 while it is set"
-              echo "::notice::vars.AI_REVIEW_DISABLE_$1 is deprecated and stops being read after 2026-12-06 — set vars.AI_REVIEW_$1 instead"
+              echo "::notice::vars.AI_REVIEW_DISABLE_$1 is deprecated and overrides vars.AI_REVIEW_$1 while it is set — remove it, then use vars.AI_REVIEW_$1 to control this feature. Support ends no earlier than 2026-12-06"
               return 0
             fi
             case "$(printf %s "$2" | tr "[:upper:]" "[:lower:]")" in

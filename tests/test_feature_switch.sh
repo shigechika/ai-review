@@ -76,6 +76,12 @@ t "a legacy DISABLE_ value forces off"          "on=0 rc=0"   "$(sw '' 1 1 | cut
 t "...and it beats an explicit new true"        "on=0 rc=0"   "$(sw true 1 1 | cut -d' ' -f1,2)"
 t "...and says it is deprecated"                "yes" \
   "$(case "$(sw '' 1 1)" in *'::notice::vars.AI_REVIEW_DISABLE_TESTFEAT is deprecated'*) echo yes ;; *) echo no ;; esac)"
+# The NOTICE is bound by the same rule as the hint below it, and was not
+# at first: telling a caller to set the new variable, while the legacy
+# one overrides it, points at a change that does nothing (GitHub Copilot
+# on PR #69, after codex had already fixed the hint alone).
+t "...and the notice says to REMOVE the legacy one" "yes" \
+  "$(case "$(sw '' 1 1)" in *'overrides vars.AI_REVIEW_TESTFEAT while it is set'*'remove it'*) echo yes ;; *) echo no ;; esac)"
 # The remedy has to name the LEGACY variable on this path. Advising the
 # caller to set the new one is advice that changes nothing, because the
 # legacy variable overrides it for as long as it is set — the whole
