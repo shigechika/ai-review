@@ -160,6 +160,13 @@ t "engine: nor a file changed in an earlier round (delta header honesty)" "yes" 
   "$(grep -F 'grep -vxF -f attach_list.txt' /tmp/pic_run.sh | grep -qF -- '-f prfiles.txt' && echo yes || echo no)"
 t "engine: imported header does not claim the file is unchanged" "no" \
   "$(grep -F 'fnote=' /tmp/pic_run.sh | grep -qiF 'not changed' && echo yes || echo no)"
+# R5F1: nor may the SECTION heading over the attachments (reviewer or
+# verifier prompt) — the exclusion against the PR file list is only as
+# good as that list, which is empty when the files API failed.
+t "R5F1: no prompt heading calls attached imports unchanged" "0" \
+  "$(grep -F 'echo "' /tmp/pic_run.sh | grep -F 'those files import' | grep -ci 'unchanged')"
+t "R5F1: delta round without the PR file list attaches no imports" "yes" \
+  "$(grep -qF 'if [ "$DELTA_MODE" = "1" ] && ! grep -q . prfiles.txt; then' /tmp/pic_run.sh && echo yes || echo no)"
 t "engine: import candidates capped like docs-mode citations" "yes" \
   "$(grep -F 'imports_raw.txt' /tmp/pic_run.sh | grep -qF 'head -40' && echo yes || echo no)"
 t "engine: IMPORT_COUNT_CAP lives in the Byte caps block" "yes" \

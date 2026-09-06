@@ -219,6 +219,11 @@ set — see "pr-gate.yml invariants" below.
   Imports are now filtered against the full PR file list as well, and
   the header says "imported by a changed file — evidence, not report
   scope", which holds even when that list is empty on API failure.
+  The SECTION heading over the attachments is bound by the same rule —
+  it was reworded to "unchanged modules those files import" one commit
+  later and R5F1 caught it: in a delta round with an empty file list
+  the engine cannot verify "unchanged", so it now says only "modules
+  those files import" and, in that exact case, attaches no imports.
 - Candidate ORDER matters more than candidate COUNT under a cap. The
   import resolver emits tier-major (relative, anchored, fallback, then
   the name-as-submodule guesses of each) and, within a tier,
