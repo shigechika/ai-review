@@ -966,7 +966,7 @@ jobs:
           # budget clamp and the honest TRUNCATED header apply to an imported
           # file by construction — never a second copy of this logic.
           attach_from_list() { # <list-file> <changed|imported>
-            local list=$1 kind=$2 f enc fmeta fsize fsent fhead flabel fnote cap remaining
+            local list=$1 kind=$2 f enc fmeta fsize fclamped fsent fhead flabel fnote cap remaining
             while IFS= read -r f; do
               [ -n "$f" ] || continue
               # Three kinds of exclusion, and the first two are not about
@@ -1050,8 +1050,15 @@ jobs:
                         --jq 'select(.type=="file" and .encoding=="base64") | "\(.size)\t\(.content)"' 2>/dev/null || true)
               [ -n "$fmeta" ] || continue
               fsize=${fmeta%%$'\t'*}
+              # head -c and iconv -c are separate steps on purpose: the
+              # TRUNCATED label is decided on what the CAP clamped
+              # (fclamped), not on the final byte count — one stray
+              # non-UTF-8 byte in an under-cap file must not relabel it
+              # (same rule as the guidance headers above).
               printf '%s' "${fmeta#*$'\t'}" | tr -d '\n' | base64 -d 2>/dev/null \
-                | head -c "$cap" | iconv -f UTF-8 -t UTF-8 -c 2>/dev/null > fbody.txt || true
+                | head -c "$cap" > fraw.txt || true
+              fclamped=$(wc -c < fraw.txt | tr -d ' ')
+              iconv -f UTF-8 -t UTF-8 -c < fraw.txt > fbody.txt 2>/dev/null || true
               [ -s fbody.txt ] || continue
               fsent=$(wc -c < fbody.txt | tr -d ' ')
               if [ "$kind" = "imported" ]; then
@@ -1061,7 +1068,7 @@ jobs:
                 flabel="Changed file"
                 fnote=""
               fi
-              if [ "$fsent" -lt "$fsize" ]; then
+              if [ "$fclamped" -lt "$fsize" ]; then
                 fhead="=== $flabel (${fnote}TRUNCATED — first ${fsent} of ${fsize} bytes at PR head): $f ==="
               else
                 fhead="=== $flabel (${fnote}full content at PR head): $f ==="
