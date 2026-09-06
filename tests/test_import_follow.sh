@@ -98,14 +98,46 @@ t "comma-separated import: aliased second"   "yes" "$(has src/c/d.py)"
 resolve src/pkg/mod.py $'from .util import a\nfrom .util import a' > /tmp/pic_out.txt
 t "duplicates collapsed"                     "1"   "$(grep -cxF src/pkg/util.py /tmp/pic_out.txt)"
 
+# ---------- Ordering under the candidate cap ----------
+# Module candidates of every tier come before any name-as-submodule guess,
+# so six imports with several names each cannot push the sixth module
+# (or the src/ fallback of the first) past the 40-entry cap.
+src=''
+for m in one two three four five six; do src="$src"$'\n'"from pkg.$m import alpha, beta, gamma, delta"; done
+resolve tests/test_mod.py "$src" > /tmp/pic_out.txt
+last_mod=$(grep -nxF 'src/pkg/six.py' /tmp/pic_out.txt | cut -d: -f1)
+first_guess=$(grep -n '/alpha\.py$' /tmp/pic_out.txt | head -1 | cut -d: -f1)
+t "order: last module precedes first name guess" "yes" \
+  "$([ -n "$last_mod" ] && [ -n "$first_guess" ] && [ "$last_mod" -lt "$first_guess" ] && echo yes || echo no)"
+t "order: every module candidate within the cap" "yes" \
+  "$([ "$(grep -n -E '^(src/)?pkg/(one|two|three|four|five|six)(\.py|/__init__\.py)$' /tmp/pic_out.txt | tail -1 | cut -d: -f1)" -le 40 ] && echo yes || echo no)"
+# `from . import x` names ARE modules — they stay in the first tier.
+resolve src/pkg/mod.py $'from . import bare\nfrom pkg.core import guess' > /tmp/pic_out.txt
+t "order: bare relative name stays ahead of name guesses" "yes" \
+  "$([ "$(grep -nxF src/pkg/bare.py /tmp/pic_out.txt | cut -d: -f1)" -lt "$(grep -nxF src/pkg/core/guess.py /tmp/pic_out.txt | cut -d: -f1)" ] && echo yes || echo no)"
+
+# ---------- Root-level package is a real root (empty prefix) ----------
+# A string-joined root set dropped the empty prefix; the always-on
+# fallback masked it. With counted roots pkg/core.py is an ANCHORED
+# candidate and therefore precedes the src/ fallback.
+printf 'pkg/core.py\ntests/test_mod.py\n' > /tmp/pic_prfiles.txt
+resolve tests/test_mod.py 'from pkg.core import run' > /tmp/pic_out.txt
+t "empty-prefix root: anchored before src/ fallback" "pkg/core.py src/pkg/core.py" \
+  "$(grep -E '^(src/)?pkg/core\.py$' /tmp/pic_out.txt | tr '\n' ' ' | sed 's/ $//')"
+printf 'src/pkg/mod.py\ntests/test_mod.py\n' > /tmp/pic_prfiles.txt
+
 # ---------- Engine wiring ----------
 extract_run > /tmp/pic_run.sh
 t "engine: imports collected only for *.py, never in docs-mode" "yes" \
   "$(grep -A1 -F 'if [ "${f%.py}" != "$f" ] && [ "$DOCS_MODE" != "1" ]; then' /tmp/pic_run.sh | grep -qF 'py_import_candidates "$f" prfiles.txt < fbody.txt >> imports_raw.txt' && echo yes || echo no)"
 t "engine: changed files attached before imports" "yes" \
   "$(awk '/attach_from_list attach_list.txt changed/ {c=NR} /attach_from_list attach_imports.txt imported/ {i=NR} END {exit !(c && i && c < i)}' /tmp/pic_run.sh && echo yes || echo no)"
-t "engine: a changed file is never re-attached as an import" "yes" \
-  "$(grep -qF 'grep -vxFf attach_list.txt' /tmp/pic_run.sh && echo yes || echo no)"
+t "engine: a file from this round is never re-attached as an import" "yes" \
+  "$(grep -qF 'grep -vxF -f attach_list.txt -f prfiles.txt' /tmp/pic_run.sh && echo yes || echo no)"
+t "engine: nor a file changed in an earlier round (delta header honesty)" "yes" \
+  "$(grep -F 'grep -vxF -f attach_list.txt' /tmp/pic_run.sh | grep -qF -- '-f prfiles.txt' && echo yes || echo no)"
+t "engine: imported header does not claim the file is unchanged" "no" \
+  "$(grep -F 'fnote=' /tmp/pic_run.sh | grep -qiF 'not changed' && echo yes || echo no)"
 t "engine: import candidates capped like docs-mode citations" "yes" \
   "$(grep -F 'imports_raw.txt' /tmp/pic_run.sh | grep -qF 'head -40' && echo yes || echo no)"
 t "engine: IMPORT_COUNT_CAP lives in the Byte caps block" "yes" \

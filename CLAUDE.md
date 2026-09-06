@@ -26,7 +26,14 @@ set — see "pr-gate.yml invariants" below.
   the model, so it must not be editable by the PR under review; changed-file
   attachments are the review subject, same trust class as the diff. This
   asymmetry is intentional and documented inline. The guidance paths are
-  also on the attachment deny-list — keep them there.
+  also on the attachment deny-list — keep them there. The imported-file
+  attachments (code-mode: the Python modules the changed files import,
+  resolved syntactically by `py_import_candidates`) are read at HEAD
+  too, through the SAME loop (`attach_from_list`) so the deny-list and
+  budget apply by construction — they are evidence for the subject,
+  never report scope, and the prompt says so. Forward direction only:
+  callers of the changed code are not found, and the prompt tells the
+  model not to read their absence as evidence.
 - **Advisory contract.** Every failure path must soft-fail (`exit 0` with a
   `::warning::`), so the job can never block a PR. New code paths must
   preserve this: guard command substitutions, consume statuses, remember
@@ -196,6 +203,29 @@ set — see "pr-gate.yml invariants" below.
   not trust memory or review alone for this one, run the tests.
 - Byte caps are named in one block ("Byte caps") — change budgets there,
   and keep the header comment's arithmetic in sync.
+- The run block must contain exactly ONE `case "$f" in`.
+  `test_deny_list.sh` extracts the first such block by substring, so a
+  second one would either be ignored or hijack the extraction — and a
+  comment that merely quotes the phrase counts too, since
+  `test_import_follow.sh` counts occurrences. Branch on `$f` some other
+  way (`[ "${f%.py}" != "$f" ]`). Tripped twice on PR #60 before the
+  counting assertion existed.
+- An attachment header may claim only what the engine verified. "NOT
+  changed by this PR" on an imported file was false in a delta round —
+  the attach list holds only the new-commit files, so a module changed
+  in round 1 and imported by a round-2 file came back labelled
+  untouched while its hunks sat in the full diff (advisor, PR #60).
+  Imports are now filtered against the full PR file list as well, and
+  the header says "imported by a changed file — evidence, not report
+  scope", which holds even when that list is empty on API failure.
+- Candidate ORDER matters more than candidate COUNT under a cap. The
+  import resolver emits module candidates of every tier before any
+  name-as-submodule guess, because six imports with a few names each
+  filled the 40-entry cap with guesses before the sixth module (or the
+  `src/` fallback the nested-tests layout needs) was reached
+  (advisor + R2F1 on PR #60). And an empty prefix is a real package
+  root: a string-joined root set silently dropped it, masked by the
+  always-on fallback — roots are counted arrays for that reason.
 - Truncation must be labelled: a clamped attachment gets the `TRUNCATED`
   header, never a "full content" label. The label is decided on what the
   CAP actually clamped, not on the final byte count — `head -c` and
