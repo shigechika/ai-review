@@ -854,16 +854,21 @@ jobs:
           # paths for the modules it imports, most certain first:
           #   1. relative imports (from .x / from ..y import z) — in-repo by
           #      definition, resolved against the importing file directory;
-          #   2. absolute imports whose top package is a directory component
-          #      of the importing file path (src/pkg/mod.py importing
-          #      pkg.core -> src/pkg/core.py) or of any changed path in the
-          #      PR (the file list carries the package root for free);
-          #   3. everything else that is not a well-known stdlib name, tried
-          #      at the repo root and under src/ — the tests-only PR shape
-          #      (tests/test_x.py importing pkg.core) with no other anchor.
+          #   2. absolute imports anchored on a package root: every prefix
+          #      under which the top package appears as a directory
+          #      component of the importing file path (first) or of any
+          #      changed path in the PR (src/pkg/mod.py importing pkg.core
+          #      -> src/pkg/core.py). ALL such roots are kept, not the first
+          #      seen — tests/pkg/test_core.py must not hide src/pkg/;
+          #   3. every non-stdlib absolute import, anchored or not, is also
+          #      tried at the repo root and under src/ (behind the anchored
+          #      candidates) — the tests-only PR shape with no other anchor,
+          #      and the nested-tests layout above (both found by this
+          #      engine reviewing its own change, R1F1 on PR #60).
           # For each module both mod.py and mod/__init__.py are tried; a
-          # lower-case imported name is also tried as a submodule
-          # (from pkg import helpers -> pkg/helpers.py). The stdlib list only
+          # lower-case imported name is also tried as a submodule, again in
+          # both forms (from pkg import helpers -> pkg/helpers.py and
+          # pkg/helpers/__init__.py — R1F2 on PR #60). The stdlib list only
           # saves round trips: a missing entry is a wasted 404, not a bug.
           # Names inside a parenthesized multi-line import are not seen
           # (the module itself still is). Callers of the changed code are
@@ -876,16 +881,20 @@ jobs:
               nself = split(self, sc, "/")
               dir = ""
               for (i = 1; i < nself; i++) dir = dir sc[i] "/"
+              pre = ""
+              for (i = 1; i < nself; i++) { addroot(sc[i], pre); pre = pre sc[i] "/" }
               while ((getline line < listfile) > 0) {
                 n = split(line, pc, "/")
                 pre = ""
-                for (i = 1; i < n; i++) { if (!(pc[i] in root)) root[pc[i]] = pre; pre = pre pc[i] "/" }
+                for (i = 1; i < n; i++) { addroot(pc[i], pre); pre = pre pc[i] "/" }
               }
-              pre = ""
-              for (i = 1; i < nself; i++) { root[sc[i]] = pre; pre = pre sc[i] "/" }
               nstd = split("os sys re json typing pathlib asyncio logging datetime time subprocess collections functools itertools dataclasses enum io unittest argparse shutil tempfile urllib http socket ssl hashlib base64 textwrap string math random uuid contextlib abc copy struct signal threading queue csv sqlite3 decimal statistics secrets warnings traceback inspect importlib glob fnmatch configparser platform zoneinfo email mimetypes ipaddress zipfile tarfile gzip pprint operator types weakref heapq bisect codecs select selectors concurrent multiprocessing pickle html xml __future__ builtins typing_extensions", sl, " ")
               for (i = 1; i <= nstd; i++) stdlib[sl[i]] = 1
               nrel = 0; nanc = 0; nfb = 0
+            }
+            function addroot(name, pre) {
+              if (index(" " roots[name] " ", " " pre " ")) return
+              roots[name] = (name in roots) ? roots[name] " " pre : pre
             }
             function add(tier, p) {
               if (p in seen) return
@@ -898,7 +907,17 @@ jobs:
             function emit_module(tier, base, names, nn,   k) {
               add(tier, base ".py")
               add(tier, base "/__init__.py")
-              for (k = 1; k <= nn; k++) if (names[k] ~ /^[a-z_][a-z0-9_]*$/) add(tier, base "/" names[k] ".py")
+              for (k = 1; k <= nn; k++) if (names[k] ~ /^[a-z_][a-z0-9_]*$/) { add(tier, base "/" names[k] ".py"); add(tier, base "/" names[k] "/__init__.py") }
+            }
+            function emit_absolute(mod, names, nn,   top, nr, r, k) {
+              top = mod; sub(/\..*$/, "", top)
+              if (top in stdlib) return
+              if (top in roots) {
+                nr = split(roots[top], r, " ")
+                for (k = 1; k <= nr; k++) emit_module(2, r[k] modpath(mod), names, nn)
+              }
+              emit_module(3, modpath(mod), names, nn)
+              emit_module(3, "src/" modpath(mod), names, nn)
             }
             function emit_bare(tier, rdir, names, nn,   k) {
               for (k = 1; k <= nn; k++) if (names[k] ~ /^[a-z_][a-z0-9_]*$/) { add(tier, rdir names[k] ".py"); add(tier, rdir names[k] "/__init__.py") }
@@ -932,12 +951,7 @@ jobs:
                   for (i = 1; i <= keep; i++) rdir = rdir sc[i] "/"
                   if (rest != "") emit_module(1, rdir modpath(rest), names, nn)
                   else emit_bare(1, rdir, names, nn)
-                } else {
-                  top = mod; sub(/\..*$/, "", top)
-                  if (top in stdlib) next
-                  if (top in root) emit_module(2, root[top] modpath(mod), names, nn)
-                  else { emit_module(3, modpath(mod), names, nn); emit_module(3, "src/" modpath(mod), names, nn) }
-                }
+                } else emit_absolute(mod, names, nn)
               } else if (line ~ /^import[ \t]+[A-Za-z0-9_.]/) {
                 sub(/^import[ \t]+/, "", line)
                 sub(/#.*$/, "", line)
@@ -947,10 +961,7 @@ jobs:
                   gsub(/^[ \t]+|[ \t]+$/, "", mod)
                   sub(/[ \t]+as[ \t]+.*$/, "", mod)
                   if (mod !~ /^[A-Za-z0-9_.]+$/) continue
-                  top = mod; sub(/\..*$/, "", top)
-                  if (top in stdlib) continue
-                  if (top in root) emit_module(2, root[top] modpath(mod), none, 0)
-                  else { emit_module(3, modpath(mod), none, 0); emit_module(3, "src/" modpath(mod), none, 0) }
+                  emit_absolute(mod, none, 0)
                 }
               }
             }

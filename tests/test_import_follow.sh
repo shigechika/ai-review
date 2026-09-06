@@ -48,7 +48,10 @@ resolve src/pkg/mod.py $'from pkg.core import run as r\nimport pkg.sub.deep' > /
 t "anchored: root taken from own path"       "yes" "$(has src/pkg/core.py)"
 t "anchored: aliased name still resolved"    "yes" "$(has src/pkg/core/run.py)"
 t "anchored: dotted import"                  "yes" "$(has src/pkg/sub/deep.py)"
-t "anchored: no root-level duplicate"        "no"  "$(has pkg/core.py)"
+# Since R1F1 the root/src fallback is always added BEHIND the anchored
+# candidate — anchored first, so the budget bites the guess, not the hit.
+t "anchored: precedes the root-level fallback" "src/pkg/core.py pkg/core.py" \
+  "$(grep -E '^(src/)?pkg/core\.py$' /tmp/pic_out.txt | tr '\n' ' ' | sed 's/ $//')"
 
 # ---------- Tests-only PR: anchor comes from the PR file list ----------
 resolve tests/test_mod.py 'from pkg.core import run' > /tmp/pic_out.txt
@@ -59,6 +62,26 @@ resolve tests/test_mod.py 'import other_pkg.thing' > /tmp/pic_out.txt
 t "fallback: repo root"                      "yes" "$(has other_pkg/thing.py)"
 t "fallback: src/"                           "yes" "$(has src/other_pkg/thing.py)"
 t "fallback: exactly 4 candidates"           "4"   "$(wc -l < /tmp/pic_out.txt | tr -d ' ')"
+
+# ---------- Selftest findings on PR #60 ----------
+# R1F1: a nested tests package (tests/pkg/test_core.py) anchored `pkg`
+# under tests/ and, being the first root seen, hid src/pkg/ entirely.
+printf 'tests/pkg/test_core.py\n' > /tmp/pic_prfiles.txt
+resolve tests/pkg/test_core.py 'from pkg.core import run' > /tmp/pic_out.txt
+t "R1F1: nested tests root is tried"         "yes" "$(has tests/pkg/core.py)"
+t "R1F1: src/ fallback is still tried"       "yes" "$(has src/pkg/core.py)"
+t "R1F1: repo-root fallback is still tried"  "yes" "$(has pkg/core.py)"
+t "R1F1: anchored candidate comes first"     "tests/pkg/core.py" "$(head -1 /tmp/pic_out.txt)"
+# Both roots survive when the PR list carries a second one.
+printf 'tests/pkg/test_core.py\nlib/pkg/core.py\n' > /tmp/pic_prfiles.txt
+resolve tests/pkg/test_core.py 'from pkg.core import run' > /tmp/pic_out.txt
+t "R1F1: second root from the PR list kept"  "yes" "$(has lib/pkg/core.py)"
+printf 'src/pkg/mod.py\ntests/test_mod.py\n' > /tmp/pic_prfiles.txt
+# R1F2: a lower-case imported name was tried as name.py but never as
+# name/__init__.py, so an imported subpackage was never attached.
+resolve src/pkg/mod.py 'from app import plugins' > /tmp/pic_out.txt
+t "R1F2: imported name as module"            "yes" "$(has app/plugins.py)"
+t "R1F2: imported name as package"           "yes" "$(has app/plugins/__init__.py)"
 
 # ---------- Noise that must produce nothing ----------
 resolve src/pkg/mod.py $'import os, sys\nfrom typing import Any\n# import commented\nprint("from x import y")\nfrom __future__ import annotations' > /tmp/pic_out.txt
