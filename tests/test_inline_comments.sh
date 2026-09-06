@@ -97,6 +97,11 @@ t "id: multi-digit round and number"  "R12F3" "$(finding_id '===FINDING R12F3===
 # An id carrying --> would close the HTML comment marker early.
 t "id: closing an HTML comment"       ""     "$(finding_id '===FINDING R1F1--><b>x===')"
 t "id: wrong shape"                   ""     "$(finding_id '===FINDING FINDING1===')"
+# These three pass the character class in the sed above and are rejected
+# only by the shape check after it — without them that check is vacuous.
+t "id: letters but no numbers"         ""     "$(finding_id '===FINDING RF===')"
+t "id: numbers but no letters"         ""     "$(finding_id '===FINDING 123===')"
+t "id: one field too many"             ""     "$(finding_id '===FINDING R1F1F1===')"
 t "id: empty"                         ""     "$(finding_id '===FINDING ===')"
 t "id: not a finding line"            ""     "$(finding_id 'severity: blocking')"
 
