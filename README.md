@@ -288,8 +288,10 @@ it is bounded, and the evidence is written by the repository itself.
 > **Deprecated.** `AI_REVIEW_DISABLE_IMPORTS`, `AI_REVIEW_DISABLE_README`
 > and `AI_REVIEW_DISABLE_PRIOR_REVIEW` still force their feature off and
 > still win over the variables above, so a repository that set one keeps
-> its behaviour. They log a `::notice::` and stop being read in the next
-> release. `AI_REVIEW_DISABLE_GATE` is a different thing — it belongs to
+> its behaviour. They log a `::notice::` and are read until at least
+> **2026-12-06** — releases here can be under an hour apart, and a log
+> line is not a channel anyone reads on a schedule.
+> `AI_REVIEW_DISABLE_GATE` is a different thing — it belongs to
 > `pr-gate.yml` and is not affected.
 
 If the deployment rejects `reasoning_effort` with HTTP 400, the engine

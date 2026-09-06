@@ -234,7 +234,12 @@ jobs:
           # that already set one does not silently change behaviour under
           # the moving v1 tag. Any non-empty value still forces the feature
           # off and wins over the variable above. Removed in the next
-          # release (issue #68).
+          # release. Kept until at least 2026-12-06, not merely until the
+          # next release: releases here can be under an hour apart, and a
+          # ::notice:: in a job log is not a channel anyone reads on a
+          # schedule. The workflow cannot enumerate its callers to check
+          # who still sets one, which argues for a LONGER window, not a
+          # shorter one (codex). Tracked in issue #68.
           DISABLE_IMPORTS: ${{ vars.AI_REVIEW_DISABLE_IMPORTS }}
           DISABLE_README: ${{ vars.AI_REVIEW_DISABLE_README }}
           DISABLE_PRIOR_REVIEW: ${{ vars.AI_REVIEW_DISABLE_PRIOR_REVIEW }}
@@ -564,12 +569,23 @@ jobs:
           # substitution that fails would take the whole job down under
           # errexit, and the advisory contract says a switch can never do
           # that.
+          #
+          # FEATURE_HINT is the second output, and it exists because the
+          # obvious advice is WRONG on one path: while a deprecated
+          # variable is set it OVERRIDES the new one, so telling that
+          # caller to set the new variable to true sends them to a
+          # setting that changes nothing. Only this function knows which
+          # branch fired, so only this function can word the remedy
+          # (codex review, on the commit that introduced the switch).
           FEATURE_ON=0
+          FEATURE_HINT=""
           feature_switch() { # <feature-name> <new-value> <legacy-value> <default 1|0>
             FEATURE_ON="$4"
+            FEATURE_HINT="set vars.AI_REVIEW_$1=true"
             if [ -n "$3" ]; then
               FEATURE_ON=0
-              echo "::notice::vars.AI_REVIEW_DISABLE_$1 is deprecated and stops being read in the next release — set vars.AI_REVIEW_$1=false instead"
+              FEATURE_HINT="remove the deprecated vars.AI_REVIEW_DISABLE_$1, which overrides vars.AI_REVIEW_$1 while it is set"
+              echo "::notice::vars.AI_REVIEW_DISABLE_$1 is deprecated and stops being read after 2026-12-06 — set vars.AI_REVIEW_$1 instead"
               return 0
             fi
             case "$(printf %s "$2" | tr "[:upper:]" "[:lower:]")" in
@@ -1513,7 +1529,7 @@ jobs:
           feature_switch IMPORTS "${FEATURE_IMPORTS:-}" "${DISABLE_IMPORTS:-}" 0
           imports_on=$FEATURE_ON
           if [ "$imports_on" = "0" ] && [ "$DOCS_MODE" != "1" ]; then
-            echo "::notice::import-following is off for this repository (set vars.AI_REVIEW_IMPORTS=true to attach the modules the changed files import)"
+            echo "::notice::import-following is off for this repository — $FEATURE_HINT to attach the modules the changed files import"
           fi
           if [ "$imports_on" = "1" ] && [ "$DOCS_MODE" != "1" ] && [ -s imports_raw.txt ]; then
             if [ "$DELTA_MODE" = "1" ] && ! grep -q . prfiles.txt; then
@@ -1573,7 +1589,7 @@ jobs:
           feature_switch PRIOR_REVIEW "${FEATURE_PRIOR_REVIEW:-}" "${DISABLE_PRIOR_REVIEW:-}" 0
           prior_on=$FEATURE_ON
           if [ "$prior_on" = "0" ]; then
-            echo "::notice::prior-review replay is off for this repository (set vars.AI_REVIEW_PRIOR_REVIEW=true to replay another reviewer comments into the prompt)"
+            echo "::notice::prior-review replay is off for this repository — $FEATURE_HINT to replay another reviewer comments into the prompt"
           fi
           if [ "$prior_on" = "1" ]; then
             # A status per call. Sharing one discarded a successfully fetched
@@ -1677,7 +1693,7 @@ jobs:
           feature_switch README "${FEATURE_README:-}" "${DISABLE_README:-}" 1
           readme_on=$FEATURE_ON
           if [ "$readme_on" = "0" ] && [ "$DOCS_MODE" != "1" ]; then
-            echo "::notice::README evidence is off for this repository (unset vars.AI_REVIEW_README to attach the READMEs as documentation evidence)"
+            echo "::notice::README evidence is off for this repository — $FEATURE_HINT to attach the READMEs as documentation evidence"
           fi
           if [ "$readme_on" = "1" ] && [ "$DOCS_MODE" != "1" ]; then
             for rf in README.md README.ja.md; do

@@ -121,7 +121,24 @@ set — see "pr-gate.yml invariants" below.
   that their feature is wired to it.
   The deprecated `AI_REVIEW_DISABLE_*` forms still win where set (a
   caller that already set one keeps its behaviour under the moving `v1`
-  tag) and are removed in the next release — issue #68.
+  tag). While one is set it OVERRIDES the new variable, so the off-notice
+  must tell that caller to remove the legacy variable, not to set the new
+  one — advice that would change nothing. Only `feature_switch` knows
+  which branch fired, so it computes the remedy into `FEATURE_HINT` and
+  the three call sites interpolate it; a hardcoded remedy at a call site
+  is the bug (codex caught it once already). Removal is dated, not
+  "next release" — issue #68, no earlier than 2026-12-06, because
+  releases here can be under an hour apart and the workflow cannot
+  enumerate its callers to see who still sets one.
+- **Changing a shipped default under the moving `v1` tag was an
+  exceptional same-day rollback, not a precedent.** Import following and
+  prior-review replay were turned off within hours of shipping on, before
+  any caller could knowingly enable either. Cutting a `v2` and migrating
+  every caller was considered and judged disproportionate for two
+  features with no adoption. A default that has been live long enough for
+  a caller to depend on it does NOT get the same treatment: "insufficient
+  evidence of value" is not on its own a licence to change an established
+  default inside `v1`.
 
 ## pr-gate.yml invariants — opposite by design, do not blur with ai-review.yml
 

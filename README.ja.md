@@ -304,7 +304,9 @@ DependabotのPR・同一リポジトリの`release-please--*`ブランチは、�
 > **非推奨。** `AI_REVIEW_DISABLE_IMPORTS`、`AI_REVIEW_DISABLE_README`、
 > `AI_REVIEW_DISABLE_PRIOR_REVIEW`は引き続き機能をoffにし、上の変数より
 > 優先されます。既に設定済みのリポジトリの挙動を変えないためです。
-> 設定されていると`::notice::`を出力し、次のリリースで読まれなくなります。
+> 設定されていると`::notice::`を出力し、少なくとも**2026-12-06**までは
+> 読み続けます。このリポジトリのリリース間隔は1時間を切ることもあり、
+> ジョブログの1行は定期的に読まれる通知経路ではないからです。
 > `AI_REVIEW_DISABLE_GATE`は別物で、`pr-gate.yml`のものなので影響を
 > 受けません。
 

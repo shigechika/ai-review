@@ -35,19 +35,19 @@ sw() {
     . /tmp/fs_fn.sh
     feature_switch TESTFEAT "$1" "$2" "$3" > /tmp/fs_log.txt 2>&1
     rc=$?
-    printf 'on=%s rc=%s %s' "$FEATURE_ON" "$rc" "$(tr '\n' ' ' < /tmp/fs_log.txt)"
+    printf 'on=%s rc=%s hint=[%s] %s' "$FEATURE_ON" "$rc" "$FEATURE_HINT" "$(tr '\n' ' ' < /tmp/fs_log.txt)"
   )
 }
 
 # ---- the value itself ----
-t "true turns a default-off feature on"         "on=1 rc=0 "  "$(sw true '' 0)"
-t "false turns a default-on feature off"        "on=0 rc=0 "  "$(sw false '' 1)"
-t "unset takes the default (on)"                "on=1 rc=0 "  "$(sw '' '' 1)"
-t "unset takes the default (off)"               "on=0 rc=0 "  "$(sw '' '' 0)"
+t "true turns a default-off feature on"         "on=1 rc=0 hint=[set vars.AI_REVIEW_TESTFEAT=true] "  "$(sw true '' 0)"
+t "false turns a default-on feature off"        "on=0 rc=0 hint=[set vars.AI_REVIEW_TESTFEAT=true] "  "$(sw false '' 1)"
+t "unset takes the default (on)"                "on=1 rc=0 hint=[set vars.AI_REVIEW_TESTFEAT=true] "  "$(sw '' '' 1)"
+t "unset takes the default (off)"               "on=0 rc=0 hint=[set vars.AI_REVIEW_TESTFEAT=true] "  "$(sw '' '' 0)"
 # Repository variables are typed by hand in a settings form; TRUE and
 # False are what people actually enter.
-t "TRUE is accepted"                            "on=1 rc=0 "  "$(sw TRUE '' 0)"
-t "False is accepted"                           "on=0 rc=0 "  "$(sw False '' 1)"
+t "TRUE is accepted"                            "on=1 rc=0 hint=[set vars.AI_REVIEW_TESTFEAT=true] "  "$(sw TRUE '' 0)"
+t "False is accepted"                           "on=0 rc=0 hint=[set vars.AI_REVIEW_TESTFEAT=true] "  "$(sw False '' 1)"
 
 # ---- a typo must be LOUD, not silently default ----
 # The failure this closes: a maintainer sets `ture`, sees no complaint,
@@ -74,8 +74,17 @@ t "a legacy DISABLE_ value forces off"          "on=0 rc=0"   "$(sw '' 1 1 | cut
 # Precedence is the point: a repo that set the old variable keeps its
 # behaviour even if someone later adds the new one saying otherwise.
 t "...and it beats an explicit new true"        "on=0 rc=0"   "$(sw true 1 1 | cut -d' ' -f1,2)"
-t "...and says what to use instead"             "yes" \
-  "$(case "$(sw '' 1 1)" in *'::notice::vars.AI_REVIEW_DISABLE_TESTFEAT is deprecated'*'AI_REVIEW_TESTFEAT=false'*) echo yes ;; *) echo no ;; esac)"
+t "...and says it is deprecated"                "yes" \
+  "$(case "$(sw '' 1 1)" in *'::notice::vars.AI_REVIEW_DISABLE_TESTFEAT is deprecated'*) echo yes ;; *) echo no ;; esac)"
+# The remedy has to name the LEGACY variable on this path. Advising the
+# caller to set the new one is advice that changes nothing, because the
+# legacy variable overrides it for as long as it is set — the whole
+# point of the precedence tested two lines up. Every other path advises
+# the new variable, so a single shared hint string would be wrong here.
+t "...and the remedy names the legacy variable"  "yes" \
+  "$(case "$(sw '' 1 1)" in *'hint=[remove the deprecated vars.AI_REVIEW_DISABLE_TESTFEAT'*) echo yes ;; *) echo no ;; esac)"
+t "...and does NOT advise the new one"           "yes" \
+  "$(case "$(sw '' 1 1)" in *'hint=[set vars.AI_REVIEW_TESTFEAT=true]'*) echo no ;; *) echo yes ;; esac)"
 
 # ---- the defaults the engine actually asks for ----
 # The values live at the call sites, so they are checked there. These
@@ -88,6 +97,10 @@ t "README defaults ON"                          "yes" \
   "$(grep -qF 'feature_switch README "${FEATURE_README:-}" "${DISABLE_README:-}" 1' /tmp/fs_run.sh && echo yes || echo no)"
 t "each call site consumes FEATURE_ON"          "3" \
   "$(grep -c '^[a-z_]*_on=\$FEATURE_ON$' /tmp/fs_run.sh)"
+# and each off-notice must carry the computed remedy rather than a
+# hardcoded one, or the deprecation path advises a no-op again.
+t "each off-notice carries FEATURE_HINT"        "3" \
+  "$(grep -c '::notice::.* is off for this repository . \$FEATURE_HINT ' /tmp/fs_run.sh)"
 
 # ---- plumbing ----
 t "all three variables reach the step env"      "3" \
