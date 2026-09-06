@@ -579,6 +579,11 @@ jobs:
           # setting that changes nothing. Only this function knows which
           # branch fired, so only this function can word the remedy
           # (codex review, on the commit that introduced the switch).
+          # It is interpolated LAST in each off-notice, never in the
+          # middle: the legacy wording ends in a verb (...while it is
+          # set), so a purpose clause appended after it fused into one
+          # phrase (...while it is set to attach the modules...), which
+          # says something the engine does not mean (/code-review).
           FEATURE_ON=0
           FEATURE_HINT=""
           feature_switch() { # <feature-name> <new-value> <legacy-value> <default 1|0>
@@ -1531,7 +1536,7 @@ jobs:
           feature_switch IMPORTS "${FEATURE_IMPORTS:-}" "${DISABLE_IMPORTS:-}" 0
           imports_on=$FEATURE_ON
           if [ "$imports_on" = "0" ] && [ "$DOCS_MODE" != "1" ]; then
-            echo "::notice::import-following is off for this repository — $FEATURE_HINT to attach the modules the changed files import"
+            echo "::notice::import-following is off for this repository — to attach the modules the changed files import, $FEATURE_HINT"
           fi
           if [ "$imports_on" = "1" ] && [ "$DOCS_MODE" != "1" ] && [ -s imports_raw.txt ]; then
             if [ "$DELTA_MODE" = "1" ] && ! grep -q . prfiles.txt; then
@@ -1591,7 +1596,7 @@ jobs:
           feature_switch PRIOR_REVIEW "${FEATURE_PRIOR_REVIEW:-}" "${DISABLE_PRIOR_REVIEW:-}" 0
           prior_on=$FEATURE_ON
           if [ "$prior_on" = "0" ]; then
-            echo "::notice::prior-review replay is off for this repository — $FEATURE_HINT to replay another reviewer comments into the prompt"
+            echo "::notice::prior-review replay is off for this repository — to replay another reviewer comments into the prompt, $FEATURE_HINT"
           fi
           if [ "$prior_on" = "1" ]; then
             # A status per call. Sharing one discarded a successfully fetched
@@ -1695,7 +1700,7 @@ jobs:
           feature_switch README "${FEATURE_README:-}" "${DISABLE_README:-}" 1
           readme_on=$FEATURE_ON
           if [ "$readme_on" = "0" ] && [ "$DOCS_MODE" != "1" ]; then
-            echo "::notice::README evidence is off for this repository — $FEATURE_HINT to attach the READMEs as documentation evidence"
+            echo "::notice::README evidence is off for this repository — to attach the READMEs as documentation evidence, $FEATURE_HINT"
           fi
           if [ "$readme_on" = "1" ] && [ "$DOCS_MODE" != "1" ]; then
             for rf in README.md README.ja.md; do

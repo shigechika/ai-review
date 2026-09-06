@@ -105,14 +105,30 @@ t "each call site consumes FEATURE_ON"          "3" \
   "$(grep -c '^[a-z_]*_on=\$FEATURE_ON$' /tmp/fs_run.sh)"
 # and each off-notice must carry the computed remedy rather than a
 # hardcoded one, or the deprecation path advises a no-op again.
-t "each off-notice carries FEATURE_HINT"        "3" \
-  "$(grep -c '::notice::.* is off for this repository . \$FEATURE_HINT ' /tmp/fs_run.sh)"
+# `.*` around the em dash, not `.`: under LC_ALL=C a dot matches one
+# BYTE and an em dash is three, so this assertion depended on the
+# locale (/code-review). The hint must come LAST, or a purpose clause
+# appended after it fuses with the legacy wording, which ends in a verb.
+t "each off-notice ends on FEATURE_HINT"        "3" \
+  "$(grep -c '::notice::.* is off for this repository .* \$FEATURE_HINT"$' /tmp/fs_run.sh)"
 
 # ---- plumbing ----
-t "all three variables reach the step env"      "3" \
-  "$(grep -cE '^ *FEATURE_(IMPORTS|README|PRIOR_REVIEW): \$\{\{ vars\.AI_REVIEW_(IMPORTS|README|PRIOR_REVIEW) \}\}$' "$ENGINE")"
-t "the deprecated three are still read"         "3" \
-  "$(grep -cE '^ *DISABLE_(IMPORTS|README|PRIOR_REVIEW): \$\{\{ vars\.AI_REVIEW_DISABLE_(IMPORTS|README|PRIOR_REVIEW) \}\}$' "$ENGINE")"
+# Each pairing asserted on its own. Two independent alternation groups
+# accept a CROSS-WIRED line: `FEATURE_IMPORTS: ${{ vars.AI_REVIEW_
+# PRIOR_REVIEW }}` matches both halves, keeps the count at 3, and leaves
+# the caller AI_REVIEW_IMPORTS variable doing nothing while the suite
+# stays green. Nothing else in the repository pins this mapping
+# (/code-review).
+env_pairs=0
+for v in IMPORTS README PRIOR_REVIEW; do
+  grep -qF "FEATURE_$v: \${{ vars.AI_REVIEW_$v }}" "$ENGINE" && env_pairs=$((env_pairs + 1))
+done
+t "each variable reaches its OWN env entry"     "3" "$env_pairs"
+legacy_pairs=0
+for v in IMPORTS README PRIOR_REVIEW; do
+  grep -qF "DISABLE_$v: \${{ vars.AI_REVIEW_DISABLE_$v }}" "$ENGINE" && legacy_pairs=$((legacy_pairs + 1))
+done
+t "each deprecated one reaches its OWN entry"   "3" "$legacy_pairs"
 t "both READMEs document all three"             "yes" \
   "$(for f in ../README.md ../README.ja.md; do
        for v in AI_REVIEW_IMPORTS AI_REVIEW_README AI_REVIEW_PRIOR_REVIEW; do

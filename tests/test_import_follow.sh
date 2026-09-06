@@ -296,9 +296,10 @@ t "engine: a failed listing is recorded, not cached as absence" "yes" \
   "$(grep -qF 'dirs_failed.txt' /tmp/pic_run.sh && grep -A2 -F 'HTTP 404" derr.txt; then' /tmp/pic_run.sh | grep -qF 'dirs_failed.txt' && echo yes || echo no)"
 t "engine: a 1000-entry listing is treated as unproven absence" "yes" \
   "$(grep -qF 'dirs_truncated.txt' /tmp/pic_run.sh && echo yes || echo no)"
-# The switch itself, its truth table and its default live in
-# test_feature_switch.sh. Here: only that this feature is wired to it,
-# and that a caller which never sets anything gets NO import step.
+# The switch itself, its truth table and its DEFAULT live in
+# test_feature_switch.sh. This assertion checks the WIRING and nothing
+# else: flipping the engine default leaves it green, so do not read it
+# as pinning the off-by-default behaviour (/code-review).
 t "engine: import-following is wired to the switch" "yes" \
   "$(grep -qF 'feature_switch IMPORTS' /tmp/pic_run.sh && grep -qF 'imports_on=$FEATURE_ON' /tmp/pic_run.sh && echo yes || echo no)"
 t "engine: prompt tells the model callers are not attached" "yes" \
