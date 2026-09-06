@@ -62,8 +62,9 @@ name: AI review
 #     invisible to a diff-only reviewer. Capped, deny-listed (secrets,
 #     binaries, guidance files) and labelled honestly when truncated.
 #   * Imported files (code-mode): the Python modules the changed files
-#     import are resolved syntactically (no checkout) and attached after
-#     the changed files, under a distinct "Imported file" header, so a
+#     import are resolved syntactically (no checkout), settled against
+#     one directory listing per candidate directory, and attached after
+#     the changed files under a distinct "Imported file" header, so a
 #     call into an unchanged callee is checked rather than guessed at.
 #     Forward direction only — callers of the changed code are not found.
 #     Same deny-list and byte budget, plus their own slot cap.
@@ -512,6 +513,14 @@ jobs:
           # budget; this sub-cap only stops a PR with two small changed
           # files from filling every remaining slot with callee modules.
           IMPORT_COUNT_CAP=6
+          # Import resolution bounds. Candidates are settled by listing
+          # their DIRECTORIES (one Contents API call per distinct directory,
+          # cached), never by probing paths one by one, so the API bound is
+          # IMPORT_DIR_CAP distinct directories; IMPORT_CANDIDATE_CAP only
+          # bounds local work on the candidate list. Neither adds prompt
+          # bytes, so the header arithmetic above is unchanged.
+          IMPORT_CANDIDATE_CAP=200
+          IMPORT_DIR_CAP=25
           case "$FILES_TOTAL_CAP_INPUT" in
             ''|*[!0-9]*) : ;;         # unset or non-numeric: keep the default
             # 10# forces base-10: a digits-only value with a leading zero
@@ -845,14 +854,19 @@ jobs:
           imports_total=0
           imports_n=0
           imports_untried=0
+          import_cands_untried=0
+          import_dirs_failed=0
+          : > dirs_done.txt
+          : > dirlist.txt
           skipped=""
 
           # ---- py_import_candidates ----
           # Python import resolution, purely syntactic: there is no
-          # checkout, so nothing can be stat-ed and every guess is settled
-          # by the Contents API (a miss is one 404 and costs no attachment
-          # slot). Reads one Python file on stdin, prints candidate repository
-          # paths for the modules it imports, most certain first:
+          # checkout, so nothing can be stat-ed; the candidates printed here
+          # are settled afterwards by import_existing_filter, which lists
+          # each candidate directory once. Reads one Python file on stdin,
+          # prints candidate repository paths for the modules it imports,
+          # most certain first:
           #   1. relative imports (from .x / from ..y import z) — in-repo by
           #      definition, resolved against the importing file directory;
           #   2. absolute imports anchored on a package root: every prefix
@@ -874,19 +888,17 @@ jobs:
           # both forms (from pkg import helpers -> pkg/helpers.py and
           # pkg/helpers/__init__.py — R1F2 on PR #60). Output order is
           # tier-major (relative, anchored, fallback, then the name guesses
-          # of each), and within a tier BREADTH-FIRST across imports by
-          # variant: every import as mod.py, then every import as
-          # src/mod.py, then as <own dir>/mod.py, then the three
-          # __init__.py forms in the same order (six ranks; giving the
-          # own-dir variant the same rank as the root one pushed src/m.py
-          # past the cap with 14 imports — R7F1 on PR #60) — so the candidate
-          # cap below cuts the least likely variant of every import, never
-          # the tenth import wholesale (depth-first, four candidates per
-          # import filled 40 with ten imports and dropped the rest — the
-          # selftest and advisor rounds on PR #60). A path keeps its BEST
-          # slot: first seen as a name guess (from pkg import sub) and later
-          # imported directly (import pkg.sub), it is promoted, not stuck
-          # behind the guesses (R3F1 on PR #60). Roots are kept as counted
+          # of each), and within a tier breadth-first across imports by
+          # variant (six ranks: root, src/, own dir, then their __init__
+          # forms). Since only files that EXIST reach the attachment loop,
+          # this order has one job left: deciding which real imports take
+          # the IMPORT_COUNT_CAP slots — certain ones before guesses. It
+          # used to also be the defence against a per-path candidate cap,
+          # and no fixed order survived fourteen imports times three roots
+          # (R1F1, R3F1, R7F1, R8F1 on PR #60); listing directories closed
+          # that class. A path keeps its BEST slot: first seen as a name
+          # guess (from pkg import sub) and later imported directly
+          # (import pkg.sub), it is promoted (R3F1). Roots are kept as counted
           # arrays because the empty prefix (a package at the repository
           # root) is a real root — a string-joined set silently dropped it,
           # masked by the always-on fallback. The stdlib list only
@@ -1003,6 +1015,59 @@ jobs:
           }
           # ---- end py_import_candidates ----
 
+          # ---- import_existing_filter ----
+          # Candidate paths in (one per line), existing paths out, order
+          # preserved. One Contents API call per distinct DIRECTORY, cached
+          # in dirlist.txt as dir<TAB>name lines — never one probe per path:
+          # a per-path probe under a candidate cap had no ordering that
+          # survived fourteen imports times three roots (R1F1, R3F1, R7F1,
+          # R8F1 on PR #60), while one listing settles every candidate in
+          # that directory at once. Shape matters: the API returns an array
+          # for a directory and an object for a file, and a candidate
+          # directory can coincide with a module file (pkg beside pkg.py),
+          # so the jq guards on type. A 404 is a real absence and the
+          # directory is cached as empty; any other failure is counted and
+          # reported at the end, never cached as absence, and its stderr is
+          # never interpolated (same rule as the guidance fetch). Past
+          # IMPORT_DIR_CAP distinct directories, remaining candidates are
+          # counted as untried rather than listed as paths — a guess that
+          # was never checked is not a file.
+          import_existing_filter() {
+            local p d b enc api dstatus names
+            while IFS= read -r p; do
+              [ -n "$p" ] || continue
+              d=${p%/*}; [ "$d" != "$p" ] || d="."
+              b=${p##*/}
+              if ! grep -qxF "$d" dirs_done.txt; then
+                if [ "$(wc -l < dirs_done.txt | tr -d ' ')" -ge "$IMPORT_DIR_CAP" ]; then
+                  import_cands_untried=$((import_cands_untried + 1))
+                  continue
+                fi
+                printf '%s\n' "$d" >> dirs_done.txt
+                if [ "$d" = "." ]; then
+                  api="repos/$GH_REPO/contents?ref=$HEAD_SHA"
+                else
+                  enc=$(printf '%s' "$d" | jq -sRr 'rtrimstr("\n") | split("/") | map(@uri) | join("/")' 2>/dev/null || true)
+                  [ -n "$enc" ] || continue
+                  api="repos/$GH_REPO/contents/$enc?ref=$HEAD_SHA"
+                fi
+                dstatus=0
+                names=$(gh api "$api" --jq 'if type == "array" then .[] | select(.type == "file") | .name else empty end' 2>derr.txt) || dstatus=$?
+                if [ "$dstatus" -ne 0 ]; then
+                  if ! grep -q "HTTP 404" derr.txt; then
+                    import_dirs_failed=$((import_dirs_failed + 1))
+                  fi
+                  continue
+                fi
+                [ -z "$names" ] || printf '%s\n' "$names" | awk -v d="$d" '{ print d "\t" $0 }' >> dirlist.txt
+              fi
+              if grep -qxF "$d"$'\t'"$b" dirlist.txt; then
+                printf '%s\n' "$p"
+              fi
+            done
+          }
+          # ---- end import_existing_filter ----
+
           # One loop for both kinds of attachment, so the deny-list, the
           # budget clamp and the honest TRUNCATED header apply to an imported
           # file by construction — never a second copy of this logic.
@@ -1071,11 +1136,10 @@ jobs:
               remaining=$((FILES_TOTAL_CAP - files_total - imports_total))
               if [ $((files_n + imports_n)) -ge "$FILE_COUNT_CAP" ] || [ "$remaining" -le 0 ] \
                  || { [ "$kind" = "imported" ] && [ "$imports_n" -ge "$IMPORT_COUNT_CAP" ]; }; then
-                # An import CANDIDATE stopped by a cap was never fetched, so
-                # nothing says it exists — count it rather than listing a
-                # guess like src/httpx/__init__.py as a file that was
-                # skipped. Deny-list skips above still name the path: those
-                # are real names the resolver produced from real imports.
+                # An imported file stopped by a cap is a real file (the
+                # listing filter proved it) but naming every one of them
+                # would drown the notice — count them; deny-list skips above
+                # still name the path.
                 if [ "$kind" = "imported" ]; then imports_untried=$((imports_untried + 1)); else skipped="$skipped $f"; fi
                 continue
               fi
@@ -1166,17 +1230,25 @@ jobs:
           # all rather than one under a description the engine did not
           # verify (R5F1 on PR #60). A full round is safe either way: its
           # attachment list is already the whole PR.
+          #
+          # The candidate list is settled by import_existing_filter (a file
+          # in between, not a pipe: the filter keeps counters that a
+          # subshell would lose), so only real files, in resolver order,
+          # reach the attachment loop.
           skipped=""
           if [ "$DOCS_MODE" != "1" ] && [ -s imports_raw.txt ]; then
             if [ "$DELTA_MODE" = "1" ] && ! grep -q . prfiles.txt; then
               echo "::notice::imported files skipped this round — the PR file list is unavailable, so a module changed in an earlier round could not be told apart from an untouched one"
             else
-              awk '!seen[$0]++' imports_raw.txt | grep -vxF -f attach_list.txt -f prfiles.txt | head -40 > attach_imports.txt || true
+              awk '!seen[$0]++' imports_raw.txt | grep -vxF -f attach_list.txt -f prfiles.txt | head -"$IMPORT_CANDIDATE_CAP" > import_cands.txt || true
+              import_existing_filter < import_cands.txt > attach_imports.txt
               attach_from_list attach_imports.txt imported
             fi
           fi
           [ -z "$skipped" ] || echo "::notice::imported files not attached (deny-list):$skipped"
-          [ "$imports_untried" -eq 0 ] || echo "::notice::imported-file candidates not tried (slot/byte cap): $imports_untried"
+          [ "$imports_untried" -eq 0 ] || echo "::notice::imported files not attached (slot/byte cap): $imports_untried"
+          [ "$import_cands_untried" -eq 0 ] || echo "::notice::import candidates in directories not listed (IMPORT_DIR_CAP): $import_cands_untried"
+          [ "$import_dirs_failed" -eq 0 ] || echo "::warning::$import_dirs_failed directory listing(s) failed — imports under them were not resolved this round"
           echo "::notice::ai-review context: docs_mode=${DOCS_MODE} delta_mode=${DELTA_MODE} diff=$(wc -c < fulldiff.txt | tr -d ' ')B delta=$(wc -c < delta.txt | tr -d ' ')B guidance=$(wc -c < guidance.txt | tr -d ' ')B review_override=$(wc -c < review_override.txt | tr -d ' ')B files=${files_n} (${files_total}B) imports=${imports_n} (${imports_total}B)"
 
           # ---------- Build the review prompt ----------

@@ -100,10 +100,8 @@ src=''
 for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14; do src="$src"$'\n'"import m$i"; done
 printf 'tests/test_mod.py\n' > /tmp/pic_prfiles.txt
 resolve tests/test_mod.py "$src" > /tmp/pic_out.txt
-t "R7F1: src/m13.py within the cap with 14 imports" "yes" \
-  "$([ "$(grep -nxF src/m13.py /tmp/pic_out.txt | cut -d: -f1)" -le 40 ] && echo yes || echo no)"
-t "R7F1: all 14 src/ modules precede the first own-dir variant" "yes" \
-  "$([ "$(grep -nxF src/m14.py /tmp/pic_out.txt | cut -d: -f1)" -lt "$(grep -nxF tests/m1.py /tmp/pic_out.txt | cut -d: -f1)" ] && echo yes || echo no)"
+t "R7F1: every src/ module is a candidate with 14 imports" "14" "$(grep -c '^src/m[0-9]*\.py$' /tmp/pic_out.txt)"
+t "R8F1: every own-dir module is a candidate with 14 imports" "14" "$(grep -c '^tests/m[0-9]*\.py$' /tmp/pic_out.txt)"
 resolve main.py 'import util' > /tmp/pic_out.txt
 t "script dir: root file adds no duplicate"      "1"   "$(grep -cxF util.py /tmp/pic_out.txt)"
 printf 'src/pkg/mod.py\ntests/test_mod.py\n' > /tmp/pic_prfiles.txt
@@ -164,7 +162,6 @@ pos_guess=$(grep -nxF pkg/helper.py /tmp/pic_out.txt | cut -d: -f1)
 t "R3F1: directly imported module promoted ahead of the remaining guess" "yes" \
   "$([ -n "$pos_sub" ] && [ -n "$pos_guess" ] && [ "$pos_sub" -lt "$pos_guess" ] && echo yes || echo no)"
 t "R3F1: promoted path printed exactly once"  "1" "$(grep -cxF pkg/sub.py /tmp/pic_out.txt)"
-t "R3F1: within the 40-entry cap"             "yes" "$([ -n "$pos_sub" ] && [ "$pos_sub" -le 40 ] && echo yes || echo no)"
 # Breadth-first within a tier: every import as mod.py before any as
 # src/mod.py, and both before the __init__ forms.
 t "breadth-first: all root .py before the first src/ variant" "yes" \
@@ -201,8 +198,12 @@ t "R5F1: no prompt heading calls attached imports unchanged" "0" \
   "$(grep -F 'echo "' /tmp/pic_run.sh | grep -F 'those files import' | grep -ci 'unchanged')"
 t "R5F1: delta round without the PR file list attaches no imports" "yes" \
   "$(grep -qF 'if [ "$DELTA_MODE" = "1" ] && ! grep -q . prfiles.txt; then' /tmp/pic_run.sh && echo yes || echo no)"
-t "engine: import candidates capped like docs-mode citations" "yes" \
-  "$(grep -F 'imports_raw.txt' /tmp/pic_run.sh | grep -qF 'head -40' && echo yes || echo no)"
+t "engine: candidate list bounded by IMPORT_CANDIDATE_CAP" "yes" \
+  "$(grep -F 'imports_raw.txt' /tmp/pic_run.sh | grep -qF 'head -"$IMPORT_CANDIDATE_CAP"' && echo yes || echo no)"
+t "engine: candidates settled by the listing filter, via a file not a pipe" "yes" \
+  "$(grep -qF 'import_existing_filter < import_cands.txt > attach_imports.txt' /tmp/pic_run.sh && echo yes || echo no)"
+t "engine: IMPORT_DIR_CAP and IMPORT_CANDIDATE_CAP live in the Byte caps block" "2" \
+  "$(awk '/# ---------- Byte caps ----------/ {b=1} b && /^IMPORT_(DIR|CANDIDATE)_CAP=/ {n++} b && /# ---------- Repository guidance/ {exit} END {print n+0}' /tmp/pic_run.sh)"
 t "engine: IMPORT_COUNT_CAP lives in the Byte caps block" "yes" \
   "$(awk '/# ---------- Byte caps ----------/ {b=1} b && /^IMPORT_COUNT_CAP=/ {found=1} b && /# ---------- Repository guidance/ {exit} END {exit !found}' /tmp/pic_run.sh && echo yes || echo no)"
 t "engine: import slot cap is checked only for kind=imported" "yes" \
@@ -213,5 +214,58 @@ t "engine: exactly one attachment loop (deny-list applies by construction)" "1" 
   "$(grep -c 'case "\$f" in' /tmp/pic_run.sh)"
 t "engine: prompt tells the model callers are not attached" "yes" \
   "$(grep -qF 'Callers of the' "$ENGINE" && echo yes || echo no)"
+
+
+# ================= import_existing_filter (extracted, gh shimmed) =================
+extract_between '# ---- import_existing_filter ----' '# ---- end import_existing_filter ----' > /tmp/ief_block.sh
+t "filter block extracted (non-empty)" "yes" "$([ -s /tmp/ief_block.sh ] && echo yes || echo no)"
+t "filter block defines the function"  "yes" "$(grep -qF 'import_existing_filter() {' /tmp/ief_block.sh && echo yes || echo no)"
+t "filter: jq guards on the array-vs-object shape" "yes" "$(grep -qF 'if type == "array" then' /tmp/ief_block.sh && echo yes || echo no)"
+t "filter: 404 is absence, other failures are counted" "yes" "$(grep -qF 'grep -q "HTTP 404" derr.txt' /tmp/ief_block.sh && echo yes || echo no)"
+t "filter: stderr is never echoed" "no" "$(grep -F 'derr.txt' /tmp/ief_block.sh | grep -qE 'cat derr|\$\(<derr|echo.*derr' && echo yes || echo no)"
+
+# shellcheck disable=SC1091
+. /tmp/ief_block.sh
+GH_REPO=o/r; HEAD_SHA=deadbeef; IMPORT_DIR_CAP=25
+gh_calls=0
+gh() { # shim: canned listings per directory route, counts calls
+  gh_calls=$((gh_calls + 1)); echo "$*" >> /tmp/ief_calls.txt
+  case "$*" in
+    *"contents?ref="*)            printf 'util.py\nREADME.md\n' ;;
+    *"contents/src%2Fpkg?"*|*"contents/src/pkg?"*) printf 'core.py\n__init__.py\n' ;;
+    *"contents/pkg?"*)            printf '{"type":"file","name":"pkg.py"}\n' | jq -r 'if type == "array" then .[] | select(.type == "file") | .name else empty end' ;;
+    *"contents/gone?"*)           echo "gh: Not Found (HTTP 404)" >&2; return 1 ;;
+    *"contents/broken?"*)         echo "gh: something else (HTTP 502)" >&2; return 1 ;;
+    *) return 1 ;;
+  esac
+}
+run_filter() { # <candidates...>  -> /tmp/ief_out.txt (file in, file out: a pipe
+  # or $(...) would run the filter in a subshell and lose its counters — the
+  # engine wires it the same way, for the same reason)
+  : > dirs_done.txt; : > dirlist.txt; : > /tmp/ief_calls.txt
+  import_cands_untried=0; import_dirs_failed=0; gh_calls=0
+  printf '%s\n' "$@" > /tmp/ief_in.txt
+  import_existing_filter < /tmp/ief_in.txt > /tmp/ief_out.txt
+  out=$(cat /tmp/ief_out.txt)
+}
+cd /tmp
+run_filter util.py src/pkg/core.py src/pkg/nope.py nothere.py src/pkg/__init__.py
+t "filter: root-dir candidate found"        "yes" "$(printf '%s\n' "$out" | grep -qxF util.py && echo yes || echo no)"
+t "filter: nested candidate found"          "yes" "$(printf '%s\n' "$out" | grep -qxF src/pkg/core.py && echo yes || echo no)"
+t "filter: missing files dropped"           "no"  "$(printf '%s\n' "$out" | grep -qE 'nope|nothere' && echo yes || echo no)"
+t "filter: order preserved"                 "util.py src/pkg/core.py src/pkg/__init__.py" "$(printf '%s\n' "$out" | tr '\n' ' ' | sed 's/ $//')"
+t "filter: one API call per distinct directory" "2" "$(wc -l < /tmp/ief_calls.txt | tr -d ' ')"
+run_filter pkg/x.py pkg/y.py
+t "filter: a directory that is really a file yields nothing" "" "$out"
+t "filter: ...and is not counted as a failure" "0" "$import_dirs_failed"
+run_filter gone/a.py
+t "filter: 404 directory yields nothing, no failure" "0" "$import_dirs_failed"
+run_filter broken/a.py broken/b.py
+t "filter: non-404 failure counted once per directory" "1" "$import_dirs_failed"
+IMPORT_DIR_CAP=1
+run_filter util.py src/pkg/core.py src/pkg/x.py
+t "filter: past IMPORT_DIR_CAP, candidates are counted as untried" "2" "$import_cands_untried"
+t "filter: ...and the listed directory still resolves" "util.py" "$out"
+cd - >/dev/null
 
 t_summary

@@ -66,7 +66,9 @@ engine:
    and a fallback — repository root, `src/`, and the importing file's own
    directory — that is always tried behind them, so a tests-only PR still
    finds its subject, a `tests/pkg/` package cannot hide `src/pkg/`, and a
-   script's `import util` finds `scripts/util.py`.
+   script's `import util` finds `scripts/util.py`. Candidates are settled
+   by listing each candidate directory once (not by probing paths), so
+   only files that exist compete for the slots.
    Forward direction only — callers of the changed code are not found,
    and the prompt tells the model not to read their absence as evidence.
    Same deny-list and byte budget as the changed files, plus a slot cap

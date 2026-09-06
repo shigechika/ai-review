@@ -224,18 +224,21 @@ set — see "pr-gate.yml invariants" below.
   later and R5F1 caught it: in a delta round with an empty file list
   the engine cannot verify "unchanged", so it now says only "modules
   those files import" and, in that exact case, attaches no imports.
-- Candidate ORDER matters more than candidate COUNT under a cap. The
-  import resolver emits tier-major (relative, anchored, fallback, then
-  the name-as-submodule guesses of each) and, within a tier,
-  BREADTH-FIRST across imports by variant (every import as `mod.py`,
-  then as `src/mod.py`, then the two `__init__.py` forms). Depth-first
-  — four candidates per import — filled the 40-entry cap with ten
-  imports and dropped the eleventh wholesale, and a path first seen as
-  a guess had to be PROMOTED when imported directly later, not
-  rejected as already seen (advisor, R2F1 and R3F1 on PR #60, one
-  round each). And an empty prefix is a real package root: a
-  string-joined root set silently dropped it, masked by the always-on
-  fallback — roots are counted arrays for that reason.
+- Settle import candidates by LISTING their directories, never by
+  probing paths under a candidate cap. PR #60 spent four selftest
+  rounds (R1F1, R3F1, R7F1, R8F1) re-ordering a per-path candidate
+  list under a 40-entry cap, and every fixed order lost some layout at
+  fourteen imports times three roots — the ordering was a symptom.
+  `import_existing_filter` lists each candidate directory once
+  (cached, `IMPORT_DIR_CAP` distinct directories), so only files that
+  exist reach the attachment loop and the resolver order has one job
+  left: which real imports take the `IMPORT_COUNT_CAP` slots. The
+  array-vs-object shape of the Contents API matters there (a candidate
+  directory can coincide with a module file); a 404 is absence, any
+  other failure is counted and warned, never cached as absence. Two
+  earlier lessons still hold inside the resolver: an empty prefix is a
+  real package root (counted arrays, R2F1), and a path first seen as a
+  guess is PROMOTED when imported directly later (R3F1).
 - Truncation must be labelled: a clamped attachment gets the `TRUNCATED`
   header, never a "full content" label. The label is decided on what the
   CAP actually clamped, not on the final byte count — `head -c` and
