@@ -892,7 +892,12 @@ jobs:
           # masked by the always-on fallback. The stdlib list only
           # saves round trips: a missing entry is a wasted 404, not a bug.
           # Names inside a parenthesized multi-line import are not seen
-          # (the module itself still is). Callers of the changed code are
+          # (the module itself still is); import-shaped lines inside
+          # triple-quoted strings are skipped (codex review of PR #60).
+          # The stdlib list holds only real standard-library names —
+          # typing_extensions is a third-party backport a repository can
+          # vendor, so it is resolved like any other (codex, twice).
+          # Callers of the changed code are
           # deliberately NOT resolved — that needs code search or a checkout.
           # Program is single-quoted: no apostrophes inside it, comments
           # included (tests/test_import_follow.sh asserts this).
@@ -909,7 +914,7 @@ jobs:
                 pre = ""
                 for (i = 1; i < n; i++) { addroot(pc[i], pre); pre = pre pc[i] "/" }
               }
-              nstd = split("os sys re json typing pathlib asyncio logging datetime time subprocess collections functools itertools dataclasses enum io unittest argparse shutil tempfile urllib http socket ssl hashlib base64 textwrap string math random uuid contextlib abc copy struct signal threading queue csv sqlite3 decimal statistics secrets warnings traceback inspect importlib glob fnmatch configparser platform zoneinfo email mimetypes ipaddress zipfile tarfile gzip pprint operator types weakref heapq bisect codecs select selectors concurrent multiprocessing pickle html xml __future__ builtins typing_extensions", sl, " ")
+              nstd = split("os sys re json typing pathlib asyncio logging datetime time subprocess collections functools itertools dataclasses enum io unittest argparse shutil tempfile urllib http socket ssl hashlib base64 textwrap string math random uuid contextlib abc copy struct signal threading queue csv sqlite3 decimal statistics secrets warnings traceback inspect importlib glob fnmatch configparser platform zoneinfo email mimetypes ipaddress zipfile tarfile gzip pprint operator types weakref heapq bisect codecs select selectors concurrent multiprocessing pickle html xml __future__ builtins", sl, " ")
               for (i = 1; i <= nstd; i++) stdlib[sl[i]] = 1
               for (i = 1; i <= 6; i++) for (k = 1; k <= 6; k++) cnt[i, k] = 0
             }
@@ -952,6 +957,15 @@ jobs:
               return m
             }
             {
+              line = $0
+              # Triple-quoted strings: a docstring example that says
+              # `import private_config` is prose, not an import. Track the
+              # open/close state by counting delimiters per line (odd
+              # count flips it); \047 is the apostrophe, which this
+              # single-quoted program cannot contain literally.
+              tq = gsub(/"""/, "", line) + gsub(/\047\047\047/, "", line)
+              if (tq % 2 == 1) { instr = !instr; next }
+              if (instr) next
               line = $0
               sub(/^[ \t]+/, "", line)
               if (line ~ /^from[ \t]+[.A-Za-z0-9_]+[ \t]+import[ \t]+/) {

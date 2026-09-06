@@ -112,6 +112,15 @@ printf 'src/pkg/mod.py\ntests/test_mod.py\n' > /tmp/pic_prfiles.txt
 resolve src/pkg/mod.py $'import os, sys\nfrom typing import Any\n# import commented\nprint("from x import y")\nfrom __future__ import annotations' > /tmp/pic_out.txt
 t "stdlib and comments: nothing emitted"     "0"   "$(wc -l < /tmp/pic_out.txt | tr -d ' ')"
 
+# ---------- Strings and the stdlib list (codex terra/luna on PR #60) ----------
+resolve src/pkg/mod.py $'"""Example:\n    import private_config\n"""\nimport real_one\nx = """import inline_a"""\ny = \x27\x27\x27\nimport inside_single\n\x27\x27\x27\nimport real_two' > /tmp/pic_out.txt
+t "strings: import inside a docstring ignored"      "no"  "$(has private_config.py)"
+t "strings: import inside single-quoted triple ignored" "no" "$(has inside_single.py)"
+t "strings: one-line triple string does not flip state" "yes" "$(has real_one.py)"
+t "strings: import after the string still resolved"  "yes" "$(has real_two.py)"
+resolve src/pkg/mod.py 'from typing_extensions import Self' > /tmp/pic_out.txt
+t "stdlib list: typing_extensions is resolved (not stdlib)" "yes" "$(has typing_extensions.py)"
+
 # ---------- Shape details ----------
 resolve src/pkg/mod.py $'import httpx\nfrom .util import a\nfrom pkg.core import b' > /tmp/pic_out.txt
 t "order: relative before anchored before fallback" "src/pkg/util.py src/pkg/core.py httpx.py" \
