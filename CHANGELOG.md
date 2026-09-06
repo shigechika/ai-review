@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.0](https://github.com/shigechika/ai-review/compare/v1.6.0...v1.7.0) (2026-09-06)
+
+
+### Features
+
+* post each finding as an inline review comment on the line it names ([#62](https://github.com/shigechika/ai-review/issues/62)) ([b4f8b77](https://github.com/shigechika/ai-review/commit/b4f8b770645c74e6c4737b24784b25c9561b29f6))
+
 ## [1.6.0](https://github.com/shigechika/ai-review/compare/v1.5.1...v1.6.0) (2026-09-06)
 
 
