@@ -516,11 +516,24 @@ jobs:
           # Import resolution bounds. Candidates are settled by listing
           # their DIRECTORIES (one Contents API call per distinct directory,
           # cached), never by probing paths one by one, so the API bound is
-          # IMPORT_DIR_CAP distinct directories; IMPORT_CANDIDATE_CAP only
-          # bounds local work on the candidate list. Neither adds prompt
-          # bytes, so the header arithmetic above is unchanged.
+          # ---------- Import caps (counts, not bytes) ----------
+          # These bound API calls and local work, not prompt size, so they
+          # take no part in the arithmetic above.
+          #
+          # IMPORT_DIR_CAP directories LISTED, and IMPORT_DIR_TRY_CAP
+          # listings ATTEMPTED. Two numbers because a guessed directory that
+          # does not exist still costs an API call: counting only attempts
+          # would let a handful of 404s starve the real directories behind
+          # them (a src/ layout guesses a root-level directory for every
+          # import first), and counting only successes would leave the API
+          # cost unbounded. IMPORT_CANDIDATE_CAP bounds local work on the
+          # candidate list. Each attempted listing is a sequential gh api
+          # round trip (roughly 0.3-0.6s), so 50 is up to ~30s added to a
+          # job that runs in 1-2 minutes — priced deliberately, not a
+          # number to raise without re-pricing it.
           IMPORT_CANDIDATE_CAP=200
           IMPORT_DIR_CAP=25
+          IMPORT_DIR_TRY_CAP=50
           case "$FILES_TOTAL_CAP_INPUT" in
             ''|*[!0-9]*) : ;;         # unset or non-numeric: keep the default
             # 10# forces base-10: a digits-only value with a leading zero
@@ -856,6 +869,7 @@ jobs:
           imports_untried=0
           import_cands_untried=0
           import_dirs_failed=0
+          import_dirs_listed=0
           : > dirs_done.txt
           : > dirlist.txt
           skipped=""
@@ -979,10 +993,22 @@ jobs:
               # would otherwise flip the state and swallow every import
               # after it (R9F1 on PR #60); inside a string the same line is
               # string content and may be the closing delimiter (R11F1).
-              if (!instr && line ~ /^[ \t]*#/) next
-              tq = gsub(/"""/, "", line) + gsub(/\047\047\047/, "", line)
-              if (tq % 2 == 1) { instr = !instr; next }
-              if (instr) next
+              # This is a heuristic, not a Python lexer: a triple quote
+              # inside an ordinary one-line string literal still opens a
+              # phantom docstring. It errs the cheap way — a phantom import
+              # costs at most one directory listing, since existence is
+              # settled by import_existing_filter, while a swallowed real
+              # import loses evidence.
+              if (instr) {
+                # Only the delimiter that OPENED the string can close it: a
+                # \047\047\047 inside a """ docstring is text, and counting it as a
+                # closer resumed parsing mid-string (R12F1 on PR #60).
+                if (((delim == 2) ? gsub(/\047\047\047/, "", line) : gsub(/"""/, "", line)) % 2 == 1) instr = 0
+                next
+              }
+              if (line ~ /^[ \t]*#/) next
+              nd = gsub(/"""/, "", line); ns = gsub(/\047\047\047/, "", line)
+              if ((nd + ns) % 2 == 1) { instr = 1; delim = (nd % 2 == 1) ? 1 : 2; next }
               line = $0
               sub(/^[ \t]+/, "", line)
               if (line ~ /^from[ \t]+[.A-Za-z0-9_]+[ \t]+import[ \t]+/) {
@@ -1020,10 +1046,21 @@ jobs:
           }
           # ---- end py_import_candidates ----
 
+          # ---- urlenc_path ----
+          # Percent-encode each path segment but keep the slashes, so a path
+          # with spaces or unicode survives as a valid API route. One copy:
+          # the changed-file fetch and the directory listing need the same
+          # thing.
+          urlenc_path() {
+            printf '%s' "$1" | jq -sRr 'rtrimstr("\n") | split("/") | map(@uri) | join("/")' 2>/dev/null || true
+          }
+          # ---- end urlenc_path ----
+
           # ---- import_existing_filter ----
           # Candidate paths in (one per line), existing paths out, order
           # preserved. One Contents API call per distinct DIRECTORY, cached
-          # in dirlist.txt as dir<TAB>name lines — never one probe per path:
+          # in dirlist.txt as dir<TAB>name lines (a 404 caches as empty, so
+          # it is never re-fetched) — never one probe per path:
           # a per-path probe under a candidate cap had no ordering that
           # survived fourteen imports times three roots (R1F1, R3F1, R7F1,
           # R8F1 on PR #60), while one listing settles every candidate in
@@ -1034,9 +1071,9 @@ jobs:
           # directory is cached as empty; any other failure is counted and
           # reported at the end, never cached as absence, and its stderr is
           # never interpolated (same rule as the guidance fetch). Past
-          # IMPORT_DIR_CAP distinct directories, remaining candidates are
-          # counted as untried rather than listed as paths — a guess that
-          # was never checked is not a file.
+          # either directory cap, remaining candidates are counted as
+          # untried rather than listed as paths — a guess that was never
+          # checked is not a file.
           import_existing_filter() {
             local p d b enc api dstatus names
             while IFS= read -r p; do
@@ -1044,15 +1081,18 @@ jobs:
               d=${p%/*}; [ "$d" != "$p" ] || d="."
               b=${p##*/}
               if ! grep -qxF "$d" dirs_done.txt; then
-                if [ "$(wc -l < dirs_done.txt | tr -d ' ')" -ge "$IMPORT_DIR_CAP" ]; then
+                if [ "$import_dirs_listed" -ge "$IMPORT_DIR_CAP" ] \
+                   || [ "$(wc -l < dirs_done.txt | tr -d ' ')" -ge "$IMPORT_DIR_TRY_CAP" ]; then
                   import_cands_untried=$((import_cands_untried + 1))
                   continue
                 fi
+                # Recorded before the call, so a directory that 404s is
+                # cached as empty and never re-fetched.
                 printf '%s\n' "$d" >> dirs_done.txt
                 if [ "$d" = "." ]; then
                   api="repos/$GH_REPO/contents?ref=$HEAD_SHA"
                 else
-                  enc=$(printf '%s' "$d" | jq -sRr 'rtrimstr("\n") | split("/") | map(@uri) | join("/")' 2>/dev/null || true)
+                  enc=$(urlenc_path "$d")
                   [ -n "$enc" ] || continue
                   api="repos/$GH_REPO/contents/$enc?ref=$HEAD_SHA"
                 fi
@@ -1064,6 +1104,7 @@ jobs:
                   fi
                   continue
                 fi
+                import_dirs_listed=$((import_dirs_listed + 1))
                 [ -z "$names" ] || printf '%s\n' "$names" | awk -v d="$d" '{ print d "\t" $0 }' >> dirlist.txt
               fi
               if grep -qxF "$d"$'\t'"$b" dirlist.txt; then
@@ -1121,6 +1162,20 @@ jobs:
                 dot.env|*/dot.env|.env|*/.env|*.env|.env.*|*/.env.*) skipped="$skipped $f"; continue ;;
                 config.ini|*/config.ini|*.pem|*.key|*.p12|*.pfx|id_rsa*|*/id_rsa*|*service_account*.json)
                   skipped="$skipped $f"; continue ;;
+                # Python modules whose NAME says they hold credentials.
+                # Added with import-following: attaching whole files used to
+                # reach only files the PR touched, and now reaches any
+                # tracked *.py the changed code merely names — so a
+                # credential module no human put in the diff can arrive in a
+                # prompt whose findings are posted publicly. Unconditional,
+                # like every other pattern here (a secret-shaped file must
+                # never be attached, however small); settings.py is
+                # deliberately NOT listed, since the common Django one reads
+                # os.environ and is useful evidence. Both spellings of
+                # the Django local-override module are listed: catching one
+                # and not the other only invites the question.
+                secrets.py|*/secrets.py|credentials.py|*/credentials.py|local_settings.py|*/local_settings.py|settings_local.py|*/settings_local.py)
+                  skipped="$skipped $f"; continue ;;
                 *.lock|package-lock.json|*/package-lock.json|*.min.*|*.min) skipped="$skipped $f"; continue ;;
                 # BINARY / BULK DATA: the API hands these back base64 like any
                 # other blob, so without a filter a tracked PNG or a .pickle.xz
@@ -1150,9 +1205,7 @@ jobs:
               fi
               cap=$FILE_CAP
               [ "$cap" -le "$remaining" ] || cap=$remaining
-              # Percent-encode each path segment but keep the slashes, so paths
-              # with spaces or unicode survive as a valid API route.
-              enc=$(printf '%s' "$f" | jq -sRr 'rtrimstr("\n") | split("/") | map(@uri) | join("/")' 2>/dev/null || true)
+              enc=$(urlenc_path "$f")
               [ -n "$enc" ] || continue
               # .size comes back with the content so the header can tell the
               # truth. Labelling a clamped file "full content" is the same lie
@@ -1245,14 +1298,16 @@ jobs:
             if [ "$DELTA_MODE" = "1" ] && ! grep -q . prfiles.txt; then
               echo "::notice::imported files skipped this round — the PR file list is unavailable, so a module changed in an earlier round could not be told apart from an untouched one"
             else
-              awk '!seen[$0]++' imports_raw.txt | grep -vxF -f attach_list.txt -f prfiles.txt | head -"$IMPORT_CANDIDATE_CAP" > import_cands.txt || true
+              awk '!seen[$0]++' imports_raw.txt | grep -vxF -f attach_list.txt -f prfiles.txt > import_cands_all.txt || true
+              head -"$IMPORT_CANDIDATE_CAP" import_cands_all.txt > import_cands.txt || true
+              import_cands_untried=$(( $(wc -l < import_cands_all.txt | tr -d " ") - $(wc -l < import_cands.txt | tr -d " ") ))
               import_existing_filter < import_cands.txt > attach_imports.txt
               attach_from_list attach_imports.txt imported
             fi
           fi
           [ -z "$skipped" ] || echo "::notice::imported files not attached (deny-list):$skipped"
           [ "$imports_untried" -eq 0 ] || echo "::notice::imported files not attached (slot/byte cap): $imports_untried"
-          [ "$import_cands_untried" -eq 0 ] || echo "::notice::import candidates in directories not listed (IMPORT_DIR_CAP): $import_cands_untried"
+          [ "$import_cands_untried" -eq 0 ] || echo "::notice::import candidates not checked (candidate/directory caps): $import_cands_untried"
           [ "$import_dirs_failed" -eq 0 ] || echo "::warning::$import_dirs_failed directory listing(s) failed — imports under them were not resolved this round"
           echo "::notice::ai-review context: docs_mode=${DOCS_MODE} delta_mode=${DELTA_MODE} diff=$(wc -c < fulldiff.txt | tr -d ' ')B delta=$(wc -c < delta.txt | tr -d ' ')B guidance=$(wc -c < guidance.txt | tr -d ' ')B review_override=$(wc -c < review_override.txt | tr -d ' ')B files=${files_n} (${files_total}B) imports=${imports_n} (${imports_total}B)"
 

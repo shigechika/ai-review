@@ -126,6 +126,13 @@ t "R9F1: import after an indented such comment"          "yes" "$(has after_inde
 # R11F1: inside a string a `# """` line is content and may close it.
 resolve src/pkg/mod.py $'x = """\n# """\nimport after_close' > /tmp/pic_out.txt
 t "R11F1: hash-prefixed closing delimiter inside a string" "yes" "$(has after_close.py)"
+# R12F1: only the delimiter that opened the string can close it.
+resolve src/pkg/mod.py $'x = """\n# \x27\x27\x27\nimport hidden\n"""\nimport visible' > /tmp/pic_out.txt
+t "R12F1: opposite delimiter does not close the string" "no"  "$(has hidden.py)"
+t "R12F1: the real closer still ends it"                "yes" "$(has visible.py)"
+resolve src/pkg/mod.py $'y = \x27\x27\x27\n"""\nimport still_inside\n\x27\x27\x27\nimport out' > /tmp/pic_out.txt
+t "R12F1: same, with the quote kinds swapped"           "no"  "$(has still_inside.py)"
+t "R12F1: ...and its own closer works"                  "yes" "$(has out.py)"
 
 # ---------- Shape details ----------
 resolve src/pkg/mod.py $'import httpx\nfrom .util import a\nfrom pkg.core import b' > /tmp/pic_out.txt
@@ -207,11 +214,21 @@ t "R5F1: no prompt heading calls attached imports unchanged" "0" \
 t "R5F1: delta round without the PR file list attaches no imports" "yes" \
   "$(grep -qF 'if [ "$DELTA_MODE" = "1" ] && ! grep -q . prfiles.txt; then' /tmp/pic_run.sh && echo yes || echo no)"
 t "engine: candidate list bounded by IMPORT_CANDIDATE_CAP" "yes" \
-  "$(grep -F 'imports_raw.txt' /tmp/pic_run.sh | grep -qF 'head -"$IMPORT_CANDIDATE_CAP"' && echo yes || echo no)"
+  "$(grep -qF 'head -"$IMPORT_CANDIDATE_CAP" import_cands_all.txt' /tmp/pic_run.sh && echo yes || echo no)"
+t "engine: candidates dropped by either cap are reported, not silent" "yes" \
+  "$(grep -qF 'import_cands_untried=$(( $(wc -l < import_cands_all.txt' /tmp/pic_run.sh && echo yes || echo no)"
+# The filter ADDS its directory-cap skips to this count, so the assignment
+# must come first or the filter increments are overwritten.
+t "engine: the candidate-cap count is assigned before the filter runs" "yes" \
+  "$(awk '/import_cands_untried=\$\(\( \$\(wc -l < import_cands_all/ {a=NR} /import_existing_filter < import_cands.txt/ {f=NR} END {exit !(a && f && a < f)}' /tmp/pic_run.sh && echo yes || echo no)"
+t "engine: one percent-encoder, not one per call site" "1" \
+  "$(grep -c 'map(@uri)' /tmp/pic_run.sh)"
+t "engine: both directory caps are checked before a listing" "yes" \
+  "$(grep -A1 -F 'if [ "$import_dirs_listed" -ge "$IMPORT_DIR_CAP" ]' /tmp/pic_run.sh | grep -qF 'IMPORT_DIR_TRY_CAP' && echo yes || echo no)"
 t "engine: candidates settled by the listing filter, via a file not a pipe" "yes" \
   "$(grep -qF 'import_existing_filter < import_cands.txt > attach_imports.txt' /tmp/pic_run.sh && echo yes || echo no)"
-t "engine: IMPORT_DIR_CAP and IMPORT_CANDIDATE_CAP live in the Byte caps block" "2" \
-  "$(awk '/# ---------- Byte caps ----------/ {b=1} b && /^IMPORT_(DIR|CANDIDATE)_CAP=/ {n++} b && /# ---------- Repository guidance/ {exit} END {print n+0}' /tmp/pic_run.sh)"
+t "engine: every import cap lives in the Byte caps block" "4" \
+  "$(awk '/# ---------- Byte caps ----------/ {b=1} b && /^IMPORT_[A-Z_]*CAP=/ {n++} b && /# ---------- Repository guidance/ {exit} END {print n+0}' /tmp/pic_run.sh)"
 t "engine: IMPORT_COUNT_CAP lives in the Byte caps block" "yes" \
   "$(awk '/# ---------- Byte caps ----------/ {b=1} b && /^IMPORT_COUNT_CAP=/ {found=1} b && /# ---------- Repository guidance/ {exit} END {exit !found}' /tmp/pic_run.sh && echo yes || echo no)"
 t "engine: import slot cap is checked only for kind=imported" "yes" \
@@ -232,15 +249,22 @@ t "filter: jq guards on the array-vs-object shape" "yes" "$(grep -qF 'if type ==
 t "filter: 404 is absence, other failures are counted" "yes" "$(grep -qF 'grep -q "HTTP 404" derr.txt' /tmp/ief_block.sh && echo yes || echo no)"
 t "filter: stderr is never echoed" "no" "$(grep -F 'derr.txt' /tmp/ief_block.sh | grep -qE 'cat derr|\$\(<derr|echo.*derr' && echo yes || echo no)"
 
+# The filter calls the shared percent-encoder, so that block is part of
+# what is under test — extract it the same way rather than redefining it.
+extract_between '# ---- urlenc_path ----' '# ---- end urlenc_path ----' > /tmp/urlenc_block.sh
+t "urlenc block extracted (non-empty)" "yes" "$([ -s /tmp/urlenc_block.sh ] && echo yes || echo no)"
+# shellcheck disable=SC1091
+. /tmp/urlenc_block.sh
 # shellcheck disable=SC1091
 . /tmp/ief_block.sh
-GH_REPO=o/r; HEAD_SHA=deadbeef; IMPORT_DIR_CAP=25
+t "urlenc: segments encoded, slashes kept" "a%20b/c%2Bd.py" "$(urlenc_path 'a b/c+d.py')"
+GH_REPO=o/r; HEAD_SHA=deadbeef; IMPORT_DIR_CAP=25; IMPORT_DIR_TRY_CAP=50
 gh_calls=0
 gh() { # shim: canned listings per directory route, counts calls
   gh_calls=$((gh_calls + 1)); echo "$*" >> /tmp/ief_calls.txt
   case "$*" in
     *"contents?ref="*)            printf 'util.py\nREADME.md\n' ;;
-    *"contents/src%2Fpkg?"*|*"contents/src/pkg?"*) printf 'core.py\n__init__.py\n' ;;
+    *"contents/src/pkg?"*)        printf 'core.py\n__init__.py\n' ;;
     *"contents/pkg?"*)            printf '{"type":"file","name":"pkg.py"}\n' | jq -r 'if type == "array" then .[] | select(.type == "file") | .name else empty end' ;;
     *"contents/gone?"*)           echo "gh: Not Found (HTTP 404)" >&2; return 1 ;;
     *"contents/broken?"*)         echo "gh: something else (HTTP 502)" >&2; return 1 ;;
@@ -251,7 +275,7 @@ run_filter() { # <candidates...>  -> /tmp/ief_out.txt (file in, file out: a pipe
   # or $(...) would run the filter in a subshell and lose its counters — the
   # engine wires it the same way, for the same reason)
   : > dirs_done.txt; : > dirlist.txt; : > /tmp/ief_calls.txt
-  import_cands_untried=0; import_dirs_failed=0; gh_calls=0
+  import_cands_untried=0; import_dirs_failed=0; import_dirs_listed=0; gh_calls=0
   printf '%s\n' "$@" > /tmp/ief_in.txt
   import_existing_filter < /tmp/ief_in.txt > /tmp/ief_out.txt
   out=$(cat /tmp/ief_out.txt)
@@ -274,6 +298,21 @@ IMPORT_DIR_CAP=1
 run_filter util.py src/pkg/core.py src/pkg/x.py
 t "filter: past IMPORT_DIR_CAP, candidates are counted as untried" "2" "$import_cands_untried"
 t "filter: ...and the listed directory still resolves" "util.py" "$out"
+IMPORT_DIR_CAP=25
+
+# A directory that 404s costs an API call but must NOT count against the
+# LISTED cap, or a src/ layout (which guesses a root-level directory for
+# every import first) starves the real directories behind them.
+IMPORT_DIR_CAP=2
+run_filter gone/a.py gone2/a.py gone3/a.py util.py src/pkg/core.py
+t "404 dirs do not consume the listed cap" "util.py src/pkg/core.py" "$(printf '%s\n' "$out" | tr '\n' ' ' | sed 's/ $//')"
+t "...and the listed count is only the real ones" "2" "$import_dirs_listed"
+# The attempt cap is what bounds API calls, 404s included.
+IMPORT_DIR_CAP=25; IMPORT_DIR_TRY_CAP=2
+run_filter gone/a.py gone2/a.py util.py src/pkg/core.py
+t "attempt cap counts 404s and stops further listings" "2" "$(wc -l < /tmp/ief_calls.txt | tr -d ' ')"
+t "...and the blocked candidates are counted untried"  "2" "$import_cands_untried"
+IMPORT_DIR_TRY_CAP=50
 cd - >/dev/null
 
 t_summary
