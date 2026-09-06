@@ -2314,11 +2314,18 @@ jobs:
           #     which one;
           #   * a failure on one finding never stops the next, and never
           #     fails the job — the advisory contract holds;
-          #   * idempotent by a marker in the body, not by the ledger. The
-          #     ledger knows a finding was REPORTED, not that its inline
-          #     post succeeded: a post that 502s once would otherwise never
-          #     be retried, because the next round sees the id as already
-          #     reported.
+          #   * deduplicated by a marker in the body rather than by the
+          #     ledger, because the ledger knows a finding was REPORTED and
+          #     not that its inline post succeeded. Note the LIMIT of that,
+          #     which an earlier version of this comment overstated (R1F1
+          #     on PR #62): the marker prevents a second copy, and lets a
+          #     finding be posted if a later round reports it again, but it
+          #     cannot RETRY a failed post on its own — the next round
+          #     builds kept.txt from that round findings only, and the
+          #     protocol forbids repeating a finding the ledger already
+          #     carries. A post that fails is reported in the warning below
+          #     and stays visible in the sticky comment; it does not come
+          #     back inline.
           #
           # A finding whose line GitHub would reject stays visible in the
           # sticky comment. That is the normal outcome for a finding the
@@ -2357,6 +2364,20 @@ jobs:
           }
           # ---- end commentable_lines ----
 
+          # ---- marker_ids ----
+          # Reads the FIRST LINE of each of our inline comment bodies and
+          # prints the finding ids among them. Two narrowings, both
+          # deliberate: the id must have the shape this workflow emits, and
+          # only the first line is ever looked at — the rest of the body is
+          # rendered model output, and a finding whose prose happened to
+          # quote the marker for another id would otherwise suppress that
+          # id forever (found by this engine reviewing its own change,
+          # R1F2 on PR #62).
+          marker_ids() {
+            sed -n -E 's/^<!-- ai-review-inline-v1:(R[0-9]+F[0-9]+) -->[[:space:]]*$/\1/p' | sort -u
+          }
+          # ---- end marker_ids ----
+
           # ---- finding_anchor ----
           # First line of a finding block is "<file>:<line> - <summary>".
           # Split on the FIRST ":<digits> - ", which is what awk match()
@@ -2391,12 +2412,12 @@ jobs:
             # rather than risk duplicating every finding.
             istatus=0
             icomments=$(gh api "repos/$GH_REPO/pulls/$PR/comments" --paginate \
-              --jq '.[] | select(.user.login == "github-actions[bot]") | .body' 2>/dev/null) || istatus=$?
+              --jq '.[] | select(.user.login == "github-actions[bot]") | .body | split("\n")[0]' 2>/dev/null) || istatus=$?
             if [ "$istatus" -ne 0 ]; then
               echo "::notice::inline comments skipped this round — the existing review comments could not be listed, and posting without that list would duplicate them"
               return 0
             fi
-            posted_ids=$(printf '%s\n' "$icomments" | grep -o "ai-review-inline-v1:[A-Za-z0-9]*" | sed "s/.*://" | sort -u || true)
+            posted_ids=$(printf '%s\n' "$icomments" | marker_ids || true)
             commentable_lines > commentable.txt 2>/dev/null || : > commentable.txt
             n_blocks=$(grep -c "^===FINDING " kept.txt 2>/dev/null || true)
             case "$n_blocks" in ""|*[!0-9]*) n_blocks=0 ;; esac

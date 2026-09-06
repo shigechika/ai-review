@@ -85,6 +85,22 @@ t "anchor: missing separator"     ""   "$(finding_anchor 'src/a.py:12 no dash')"
 # this would split and hand an empty line number downstream.
 t "anchor: empty line number"     ""   "$(finding_anchor 'src/a.py: - bad')"
 
+# ---------- Marker extraction (a body is mostly model output) ----------
+extract_between '# ---- marker_ids ----' '# ---- end marker_ids ----' > /tmp/ic_mi.sh
+t "marker_ids block extracted"        "yes" "$([ -s /tmp/ic_mi.sh ] && echo yes || echo no)"
+t "...and defines the function"       "yes" "$(grep -qF 'marker_ids() {' /tmp/ic_mi.sh && echo yes || echo no)"
+# shellcheck disable=SC1091
+. /tmp/ic_mi.sh
+t "marker: a real marker line"        "R1F1" "$(printf '<!-- ai-review-inline-v1:R1F1 -->\n' | marker_ids)"
+t "marker: prose quoting one is ignored" "" \
+  "$(printf 'see ai-review-inline-v1:R2F1 for context\n' | marker_ids)"
+t "marker: a full marker later in a line is ignored" "" \
+  "$(printf 'x <!-- ai-review-inline-v1:R2F1 -->\n' | marker_ids)"
+t "marker: a malformed id is ignored"  "" \
+  "$(printf '<!-- ai-review-inline-v1:DROP-ALL -->\n' | marker_ids)"
+t "marker: several bodies, deduplicated" "$(printf 'R1F1\nR2F1')" \
+  "$(printf '<!-- ai-review-inline-v1:R2F1 -->\n<!-- ai-review-inline-v1:R1F1 -->\n<!-- ai-review-inline-v1:R1F1 -->\n' | marker_ids)"
+
 # ---------- Wiring ----------
 extract_run > /tmp/ic_run.sh
 t "engine: inline posting runs only after the sticky post succeeded" "yes" \
@@ -105,6 +121,8 @@ t "engine: the post's stderr is never echoed" "no" \
   "$(grep -A2 -F 'gh api --method POST "repos/$GH_REPO/pulls/$PR/comments"' /tmp/ic_run.sh | grep -qE 'echo.*2>&1|post_err' && echo yes || echo no)"
 t "engine: idempotency is by marker, not by the ledger" "yes" \
   "$(grep -qF 'ai-review-inline-v1:' /tmp/ic_run.sh && grep -qF 'grep -qxF "$id"' /tmp/ic_run.sh && echo yes || echo no)"
+t "engine: only the first line of a body is scanned for the marker" "yes" \
+  "$(grep -F '.body | split' /tmp/ic_run.sh | grep -qF '[0]' && echo yes || echo no)"
 t "engine: an unaddressable finding is counted, not dropped silently" "yes" \
   "$(grep -qF 'not on a line GitHub accepts (kept in the sticky comment)' /tmp/ic_run.sh && echo yes || echo no)"
 t "engine: findings come from kept.txt, after the verifier" "yes" \
