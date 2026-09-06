@@ -1519,14 +1519,17 @@ jobs:
             # A status per call. Sharing one discarded a successfully fetched
             # review body whenever the inline listing failed — precisely the
             # body-only case the second surface was added for.
-            istatus=0
-            bstatus=0
+            # Named apart from post_inline_comments own istatus, which is
+            # a different listing entirely — a test grep could not tell
+            # the two apart otherwise.
+            prior_istatus=0
+            prior_bstatus=0
             gh api "repos/$GH_REPO/pulls/$PR/comments" --paginate \
-              --jq ".[] | select(.user.login == \"copilot-pull-request-reviewer[bot]\") | \"\(.path):\(.line // .original_line) - \(.body)\"" > prior_inline.txt 2>/dev/null || istatus=$?
-            [ "$istatus" -eq 0 ] || : > prior_inline.txt
+              --jq ".[] | select(.user.login == \"copilot-pull-request-reviewer[bot]\") | \"\(.path):\(.line // .original_line) - \(.body)\"" > prior_inline.txt 2>/dev/null || prior_istatus=$?
+            [ "$prior_istatus" -eq 0 ] || : > prior_inline.txt
             gh api "repos/$GH_REPO/pulls/$PR/reviews" --paginate \
-              --jq ".[] | select(.user.login == \"copilot-pull-request-reviewer[bot]\") | select(.body != null and .body != \"\") | .body" > prior_body.txt 2>/dev/null || bstatus=$?
-            [ "$bstatus" -eq 0 ] || : > prior_body.txt
+              --jq ".[] | select(.user.login == \"copilot-pull-request-reviewer[bot]\") | select(.body != null and .body != \"\") | .body" > prior_body.txt 2>/dev/null || prior_bstatus=$?
+            [ "$prior_bstatus" -eq 0 ] || : > prior_body.txt
             # Keep the NEWEST of each surface, not the first bytes of the
             # concatenation. Both endpoints return oldest first, so a head cut
             # would drop exactly the comments the current round most needs to
@@ -1550,8 +1553,11 @@ jobs:
               tail -c "$prior_ishare" prior_inline.txt || true
               tail -c "$prior_bshare" prior_body.txt || true
             } > prior_raw.txt 2>/dev/null || true
-            if [ "$istatus" -ne 0 ] || [ "$bstatus" -ne 0 ]; then
-              echo "::notice::a prior-review listing failed — this round sees only what was fetched"
+            if [ "$prior_istatus" -ne 0 ] || [ "$prior_bstatus" -ne 0 ]; then
+              # WARNING, not a notice: a fetch that failed is not an absent
+              # review, and the round may now repeat a point the other
+              # reviewer already made (this engine own R1F1 on PR #66).
+              echo "::warning::a prior-review listing failed — this round may repeat a point the other reviewer already made"
             fi
           fi
           if [ -s prior_raw.txt ]; then

@@ -26,18 +26,22 @@ t "the response goes to a file, not a shell variable" "no" \
 # One status per call: sharing one discarded a good review body whenever
 # the inline listing failed, the body-only case the second surface exists
 # for.
+# Names distinct from post_inline_comments own `istatus`, or a grep here
+# matches that one instead and the assertion is vacuous.
 t "each fetch has its own status"                     "yes" \
-  "$(grep -qF '|| istatus=$?' /tmp/pr_run.sh && grep -qF '|| bstatus=$?' /tmp/pr_run.sh && echo yes || echo no)"
+  "$(grep -qF 'prior_inline.txt 2>/dev/null || prior_istatus=$?' /tmp/pr_run.sh && grep -qF 'prior_body.txt 2>/dev/null || prior_bstatus=$?' /tmp/pr_run.sh && echo yes || echo no)"
 t "...and a failed one clears only its own file"      "2" \
-  "$(grep -c '\-eq 0 \] || : > prior_\(inline\|body\).txt$' /tmp/pr_run.sh)"
+  "$(grep -c 'prior_[ib]status" -eq 0 \] || : > prior_\(inline\|body\).txt$' /tmp/pr_run.sh)"
 t "the replay has a caller kill switch"               "yes" \
   "$(grep -qF 'AI_REVIEW_DISABLE_PRIOR_REVIEW' "$ENGINE" && grep -qF '[ -z "${DISABLE_PRIOR_REVIEW:-}" ] || prior_on=0' /tmp/pr_run.sh && echo yes || echo no)"
 # The counters must be set even when the switch is on, or the context
 # notice reads an unset variable under set -u.
 t "...and the counters are initialised outside it"    "yes" \
   "$(awk '/^prior_n=0/ {a = NR} /^prior_on=1/ {b = NR} END {exit !(a && b && a < b)}' /tmp/pr_run.sh && echo yes || echo no)"
-t "a failed listing degrades with a notice"            "yes" \
-  "$(grep -A1 -F 'if [ "$istatus" -ne 0 ] || [ "$bstatus" -ne 0 ]; then' /tmp/pr_run.sh | grep -qF 'a prior-review listing failed' && echo yes || echo no)"
+# A fetch failure WARNS, like every other fetch in this engine: it is not
+# an absent review, and the round may now repeat a point.
+t "a failed listing warns, not merely notices"        "yes" \
+  "$(grep -A4 -F 'if [ "$prior_istatus" -ne 0 ] || [ "$prior_bstatus" -ne 0 ]; then' /tmp/pr_run.sh | grep -qF '::warning::a prior-review listing failed' && echo yes || echo no)"
 t "the round is never made to WAIT for one"            "no" \
   "$(grep -qE 'sleep|until .*copilot' /tmp/pr_run.sh && echo yes || echo no)"
 
