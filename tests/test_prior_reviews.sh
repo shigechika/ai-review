@@ -32,12 +32,13 @@ t "each fetch has its own status"                     "yes" \
   "$(grep -qF 'prior_inline.txt 2>/dev/null || prior_istatus=$?' /tmp/pr_run.sh && grep -qF 'prior_body.txt 2>/dev/null || prior_bstatus=$?' /tmp/pr_run.sh && echo yes || echo no)"
 t "...and a failed one clears only its own file"      "2" \
   "$(grep -c 'prior_[ib]status" -eq 0 \] || : > prior_\(inline\|body\).txt$' /tmp/pr_run.sh)"
-t "the replay has a caller kill switch"               "yes" \
-  "$(grep -qF 'AI_REVIEW_DISABLE_PRIOR_REVIEW' "$ENGINE" && grep -qF '[ -z "${DISABLE_PRIOR_REVIEW:-}" ] || prior_on=0' /tmp/pr_run.sh && echo yes || echo no)"
+# Truth table and default: test_feature_switch.sh.
+t "the replay is wired to the switch"                 "yes" \
+  "$(grep -qF 'feature_switch PRIOR_REVIEW' /tmp/pr_run.sh && grep -qF 'prior_on=$FEATURE_ON' /tmp/pr_run.sh && echo yes || echo no)"
 # The counters must be set even when the switch is on, or the context
 # notice reads an unset variable under set -u.
 t "...and the counters are initialised outside it"    "yes" \
-  "$(awk '/^prior_n=0/ {a = NR} /^prior_on=1/ {b = NR} END {exit !(a && b && a < b)}' /tmp/pr_run.sh && echo yes || echo no)"
+  "$(awk '/^prior_n=0/ {a = NR} /^prior_on=\$FEATURE_ON/ {b = NR} END {exit !(a && b && a < b)}' /tmp/pr_run.sh && echo yes || echo no)"
 # A fetch failure WARNS, like every other fetch in this engine: it is not
 # an absent review, and the round may now repeat a point.
 t "a failed listing warns, not merely notices"        "yes" \

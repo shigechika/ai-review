@@ -89,6 +89,40 @@ set — see "pr-gate.yml invariants" below.
   a judge blind to a repo's own override refutes the exact findings that
   override exists to enable.
 
+- **Context-source switches: one variable per source, `true`/`false`,
+  parsed in one place.** `AI_REVIEW_IMPORTS` (default off),
+  `AI_REVIEW_README` (default ON), `AI_REVIEW_PRIOR_REVIEW` (default
+  off) all go through `feature_switch`, so the semantics cannot drift
+  between call sites. Three things about this were decided against
+  alternatives and should not be quietly undone:
+  - **Not a single `AI_REVIEW_ENABLE=a,b,c` allow-list.** It was
+    proposed and rejected: unset would have to mean "all off", which
+    silently takes away the default-on source, and turning a default-on
+    feature off then needs a special token (`none`, `-readme`). A lone
+    allow-list cannot express both a safe unset and an opt-out.
+  - **The defaults were set on evidence of value against cost, not on
+    effort spent building the feature.** README evidence is on because
+    it caught a stale claim on its own PR, its budget is bounded, and
+    the evidence is repository-owned. Import following is off because it
+    has never resolved a module on a real PR here and costs a listing
+    call per candidate directory; prior-review replay is off because it
+    is the only source carrying third-party prose and has shown no
+    measured improvement. Turning either on later needs field evidence,
+    not a rewrite.
+  - **The `*)` branch warns instead of silently defaulting, and never
+    echoes the value.** A repository variable is caller-controlled text
+    landing in a log GitHub parses for workflow commands — same hazard
+    class as model output. Naming the variable is enough to find it.
+  A switch test that only greps for a variable name is **vacuous about
+  the default**: it passes identically whether the feature is on or off.
+  `tests/test_feature_switch.sh` extracts and *executes* the function
+  across the truth table instead, and mutation-testing a flipped default
+  is how that was verified. The three per-feature suites now assert only
+  that their feature is wired to it.
+  The deprecated `AI_REVIEW_DISABLE_*` forms still win where set (a
+  caller that already set one keeps its behaviour under the moving `v1`
+  tag) and are removed in the next release — issue #68.
+
 ## pr-gate.yml invariants — opposite by design, do not blur with ai-review.yml
 
 - **`pull_request_target` is required, not forbidden.** Closing or labeling

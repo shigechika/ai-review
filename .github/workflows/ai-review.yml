@@ -63,20 +63,22 @@ name: AI review
 #
 # Context controls (what the model actually sees):
 #
-#   * A prior reviewer comments, if any: comments another reviewer already
+#   * A prior reviewer comments, if any (OFF by default,
+#     AI_REVIEW_PRIOR_REVIEW=true): comments another reviewer already
 #     left on the PR are replayed as data so the model looks for what they
 #     missed instead of restating them. Never waited for, capped, stripped
 #     of marker-shaped lines, and withheld from the verifier.
-#   * Documentation (code-mode): the root README.md / README.ja.md are
-#     attached at HEAD as evidence for one narrow check — a concrete claim
-#     the diff makes false. Own byte budget, own caller switch
-#     (AI_REVIEW_DISABLE_README), and the verifier receives them too.
+#   * Documentation (code-mode, ON by default): the root README.md /
+#     README.ja.md are attached at HEAD as evidence for one narrow check —
+#     a concrete claim the diff makes false. Own byte budget, own caller
+#     switch (AI_REVIEW_README), and the verifier receives them too.
 #   * Changed files, whole: the model gets the full current contents of the
 #     changed files, not just diff hunks, because a bug the diff introduces
 #     often lives in an unmodified function the changed code calls —
 #     invisible to a diff-only reviewer. Capped, deny-listed (secrets,
 #     binaries, guidance files) and labelled honestly when truncated.
-#   * Imported files (code-mode): the Python modules the changed files
+#   * Imported files (code-mode, OFF by default, AI_REVIEW_IMPORTS=true):
+#     the Python modules the changed files
 #     import are resolved syntactically (no checkout), settled against
 #     one directory listing per candidate directory, and attached after
 #     the changed files under a distinct "Imported file" header, so a
@@ -126,12 +128,15 @@ name: AI review
 #     max-total-file-bytes  attachment budget, changed + imported files (131072)
 #   vars only (no input):
 #     AI_REVIEW_VERIFY_EFFORT  verifier effort (low)
-#     AI_REVIEW_DISABLE_IMPORTS  any non-empty value stops attaching the
-#                                modules the changed files import
-#     AI_REVIEW_DISABLE_README   any non-empty value stops attaching the
-#                                READMEs as documentation evidence
-#     AI_REVIEW_DISABLE_PRIOR_REVIEW  any non-empty value stops replaying
-#                                another reviewer comments into the prompt
+#     AI_REVIEW_IMPORTS       true|false, default false — attach the
+#                             modules the changed files import
+#     AI_REVIEW_README        true|false, default TRUE — attach the
+#                             READMEs as documentation evidence
+#     AI_REVIEW_PRIOR_REVIEW  true|false, default false — replay another
+#                             reviewer comments into the prompt
+#   Each reads unset as its default and warns on any other value. The
+#   AI_REVIEW_DISABLE_* forms of these three are deprecated: still read
+#   for one release, still forcing the feature off, removed next release.
 #   The effort settings take the sentinel "off" to stop sending
 #   reasoning_effort at all. An empty value does NOT work as an off switch —
 #   `||` treats it as falsy and falls back to the default.
@@ -203,24 +208,35 @@ jobs:
           # normalised to "en" in the run block.
           LANGUAGE: ${{ inputs.language || vars.AI_REVIEW_LANG || 'en' }}
           FILES_TOTAL_CAP_INPUT: ${{ inputs['max-total-file-bytes'] }}
-          # Any non-empty value turns import-following off for the calling
-          # repository, leaving the rest of the review untouched. The lever
-          # exists because no basename deny-list can know every layout: a
-          # repo whose modules carry credentials under names this workflow
-          # does not recognise needs a way to stop attaching files no human
-          # put in the diff, without editing its own workflow YAML.
+          # One variable per context source, "true" or "false", read from
+          # the CALLING repository. Each is independent on purpose: the
+          # three carry different costs (latency, tokens, third-party
+          # prose) and a caller that wants one rarely wants all three. The
+          # polarity lives in the value, not in the name, so the same
+          # variable expresses both directions whatever the default is —
+          # which an ENABLE-style allow-list cannot do, since unset would
+          # then have to mean "all off" and would silently take away the
+          # default-on source too. feature_switch below owns the parsing.
+          #
+          # Defaults: README on, the other two off. Decided on evidence of
+          # value against cost, not on effort spent building them. README
+          # evidence caught a stale claim on its own PR; import-following
+          # has never resolved a module on a real PR here, costs a listing
+          # call per candidate directory, and attaches files no human put
+          # in the diff; prior-review replay is the only source carrying
+          # third-party-authored prose and has shown no improvement yet.
+          # Off does not mean unwanted — it means a caller opts in once it
+          # knows what it is paying for.
+          FEATURE_IMPORTS: ${{ vars.AI_REVIEW_IMPORTS }}
+          FEATURE_README: ${{ vars.AI_REVIEW_README }}
+          FEATURE_PRIOR_REVIEW: ${{ vars.AI_REVIEW_PRIOR_REVIEW }}
+          # Deprecated predecessors, read for one release so a repository
+          # that already set one does not silently change behaviour under
+          # the moving v1 tag. Any non-empty value still forces the feature
+          # off and wins over the variable above. Removed in the next
+          # release (issue #68).
           DISABLE_IMPORTS: ${{ vars.AI_REVIEW_DISABLE_IMPORTS }}
-          # Any non-empty value stops attaching the READMEs as documentation
-          # evidence. Same reasoning as the import switch: this adds up to
-          # 64 KiB to BOTH the reviewer and the verifier prompt on every
-          # code PR, and a repository whose README is enormous, generated,
-          # or simply not worth the tokens needs a way to opt out without
-          # editing its own workflow YAML.
           DISABLE_README: ${{ vars.AI_REVIEW_DISABLE_README }}
-          # Any non-empty value stops replaying another reviewer comments
-          # into the prompt. This is the only context source carrying
-          # third-party-authored prose, so a caller that does not want it
-          # there needs a lever that is not an edit to its own workflow.
           DISABLE_PRIOR_REVIEW: ${{ vars.AI_REVIEW_DISABLE_PRIOR_REVIEW }}
           PR: ${{ github.event.pull_request.number }}
           # gh resolves the target repo from the local git remote; with no
@@ -525,6 +541,44 @@ jobs:
             echo "::warning::could not fetch the PR diff (GitHub API error?) — skipping AI review"
             exit 0
           fi
+
+          # ---------- Feature switches ----------
+          # Three context sources are switchable per calling repository.
+          # One parser for all of them, so the semantics cannot drift
+          # apart between call sites:
+          #
+          #   true            -> on
+          #   false           -> off
+          #   unset or empty  -> the built-in default for that feature
+          #   anything else   -> the default, plus a ::warning::
+          #
+          # The last line matters more than it looks: a typo (AI_REVIEW_
+          # README set to "ture") must be visible in the run log, because
+          # the alternative is a maintainer who believes a feature is on
+          # for weeks while it never runs. The warning deliberately does
+          # NOT echo the value back — a repository variable is caller
+          # controlled text, the same workflow-command hazard class as
+          # model output, and naming the variable is enough to find it.
+          #
+          # A global, not a $(...) capture: an assignment from a command
+          # substitution that fails would take the whole job down under
+          # errexit, and the advisory contract says a switch can never do
+          # that.
+          FEATURE_ON=0
+          feature_switch() { # <feature-name> <new-value> <legacy-value> <default 1|0>
+            FEATURE_ON="$4"
+            if [ -n "$3" ]; then
+              FEATURE_ON=0
+              echo "::notice::vars.AI_REVIEW_DISABLE_$1 is deprecated and stops being read in the next release — set vars.AI_REVIEW_$1=false instead"
+              return 0
+            fi
+            case "$(printf %s "$2" | tr "[:upper:]" "[:lower:]")" in
+              true) FEATURE_ON=1 ;;
+              false) FEATURE_ON=0 ;;
+              "") ;;
+              *) echo "::warning::vars.AI_REVIEW_$1 is set to something other than true or false, so the built-in default is used instead" ;;
+            esac
+          }
 
           # ---------- Byte caps ----------
           # Named here so the whole context budget is visible in one place.
@@ -1453,10 +1507,13 @@ jobs:
           # subshell would lose), so only real files, in resolver order,
           # reach the attachment loop.
           skipped=""
-          imports_on=1
-          [ -z "${DISABLE_IMPORTS:-}" ] || imports_on=0
+          # Default off: never resolved a module on a real PR here, and it
+          # costs a directory listing per candidate plus attachments the
+          # author did not write. Opt in with vars.AI_REVIEW_IMPORTS=true.
+          feature_switch IMPORTS "${FEATURE_IMPORTS:-}" "${DISABLE_IMPORTS:-}" 0
+          imports_on=$FEATURE_ON
           if [ "$imports_on" = "0" ] && [ "$DOCS_MODE" != "1" ]; then
-            echo "::notice::import-following is off for this repository (vars.AI_REVIEW_DISABLE_IMPORTS is set)"
+            echo "::notice::import-following is off for this repository (set vars.AI_REVIEW_IMPORTS=true to attach the modules the changed files import)"
           fi
           if [ "$imports_on" = "1" ] && [ "$DOCS_MODE" != "1" ] && [ -s imports_raw.txt ]; then
             if [ "$DELTA_MODE" = "1" ] && ! grep -q . prfiles.txt; then
@@ -1510,10 +1567,13 @@ jobs:
           : > prior_body.txt
           prior_n=0
           prior_bytes=0
-          prior_on=1
-          [ -z "${DISABLE_PRIOR_REVIEW:-}" ] || prior_on=0
+          # Default off: the only context source carrying third-party
+          # authored prose, and no measured improvement yet. Opt in with
+          # vars.AI_REVIEW_PRIOR_REVIEW=true.
+          feature_switch PRIOR_REVIEW "${FEATURE_PRIOR_REVIEW:-}" "${DISABLE_PRIOR_REVIEW:-}" 0
+          prior_on=$FEATURE_ON
           if [ "$prior_on" = "0" ]; then
-            echo "::notice::prior-review replay is off for this repository (vars.AI_REVIEW_DISABLE_PRIOR_REVIEW is set)"
+            echo "::notice::prior-review replay is off for this repository (set vars.AI_REVIEW_PRIOR_REVIEW=true to replay another reviewer comments into the prompt)"
           fi
           if [ "$prior_on" = "1" ]; then
             # A status per call. Sharing one discarded a successfully fetched
@@ -1609,10 +1669,15 @@ jobs:
           : > readmes.txt
           readme_total=0
           readme_n=0
-          readme_on=1
-          [ -z "${DISABLE_README:-}" ] || readme_on=0
+          # Default ON, the only one of the three that is: it caught a
+          # stale claim in this repository own README on the PR that
+          # introduced it, the budget is bounded, and the evidence is
+          # written by the repository itself. Opt out with
+          # vars.AI_REVIEW_README=false.
+          feature_switch README "${FEATURE_README:-}" "${DISABLE_README:-}" 1
+          readme_on=$FEATURE_ON
           if [ "$readme_on" = "0" ] && [ "$DOCS_MODE" != "1" ]; then
-            echo "::notice::README evidence is off for this repository (vars.AI_REVIEW_DISABLE_README is set)"
+            echo "::notice::README evidence is off for this repository (unset vars.AI_REVIEW_README to attach the READMEs as documentation evidence)"
           fi
           if [ "$readme_on" = "1" ] && [ "$DOCS_MODE" != "1" ]; then
             for rf in README.md README.ja.md; do

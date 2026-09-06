@@ -89,10 +89,11 @@ t "the count is observable"               "yes" \
 # than prepending is what keeps that quote true.
 t "...without falsifying the documented prefix" "yes" \
   "$(grep -qF 'ai-review context: docs_mode=' ../README.md && grep -qF '::notice::ai-review context: docs_mode=' /tmp/re_run.sh && echo yes || echo no)"
-t "callers can turn README evidence off"  "yes" \
-  "$(grep -qF 'AI_REVIEW_DISABLE_README' "$ENGINE" && grep -qF '[ -z "${DISABLE_README:-}" ] || readme_on=0' /tmp/re_run.sh && echo yes || echo no)"
+# Truth table and default: test_feature_switch.sh.
+t "README evidence is wired to the switch" "yes" \
+  "$(grep -qF 'feature_switch README' /tmp/re_run.sh && grep -qF 'readme_on=$FEATURE_ON' /tmp/re_run.sh && echo yes || echo no)"
 t "...and both READMEs document that switch" "yes" \
-  "$(grep -qF 'AI_REVIEW_DISABLE_README' ../README.md && grep -qF 'AI_REVIEW_DISABLE_README' ../README.ja.md && echo yes || echo no)"
+  "$(grep -qF 'AI_REVIEW_README' ../README.md && grep -qF 'AI_REVIEW_README' ../README.ja.md && echo yes || echo no)"
 # Bounded window and the literal sentence: scanning to EOF for any
 # "never" matched a dozen unrelated ledger comments, so deleting the
 # framing while keeping `cat readmes.txt` still passed.
