@@ -24,8 +24,14 @@ t "docs-mode: empty prfiles (API fail-safe)" "0" "$(detect_docs_mode '')"
 # pagination failure yields empty, not a partial first page) — this is a
 # structural check that the gate still wraps the assignment, since a unit
 # test on detect_docs_mode alone cannot exercise gh api failing mid-page.
+# The response is saved raw (the inline-comment step reads its patches),
+# so the gate is on the call, and a partial file is truncated rather than
+# parsed: a pagination failure must not leave page one looking like the
+# whole PR.
 t "engine: files-API call is exit-status gated" "yes" \
-  "$(grep -qF 'if ! prfiles=$(gh api "repos/$GH_REPO/pulls/$PR/files' "$ENGINE" && echo yes || echo no)"
+  "$(grep -qF 'if ! gh api "repos/$GH_REPO/pulls/$PR/files?per_page=100" --paginate > prfiles.json' "$ENGINE" && echo yes || echo no)"
+t "engine: a failed files call leaves nothing to parse" "yes" \
+  "$(grep -A2 -F 'if ! gh api "repos/$GH_REPO/pulls/$PR/files?per_page=100" --paginate > prfiles.json' "$ENGINE" | grep -qF ': > prfiles.json' && echo yes || echo no)"
 
 # ---------- Evidence token extraction ----------
 extract_tokens() {
