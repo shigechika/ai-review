@@ -17,8 +17,8 @@ extract_between "focus_para='Focus on: real bugs" "most severe first.'" > /tmp/r
 t "code-mode paragraph extracted"        "yes" "$([ -s /tmp/re_code.txt ] && echo yes || echo no)"
 t "carve-out names the diff, not drift"  "yes" "$(grep -qF 'that this diff makes' /tmp/re_code.txt && echo yes || echo no)"
 t "carve-out is phrased as an addition"  "yes" "$(grep -qF 'report that check even though' /tmp/re_code.txt && echo yes || echo no)"
-t "carve-out demands both citations"     "yes" "$(grep -qF 'citing both the README line and the diff' /tmp/re_code.txt && echo yes || echo no)"
-t "parity is excluded from code-mode"    "yes" "$(grep -qF 'Do not compare the two READMEs' /tmp/re_code.txt && echo yes || echo no)"
+t "carve-out demands both citations"     "yes" \
+  "$(grep -qF 'name the README file and' /tmp/re_code.txt && echo yes || echo no)"
 t "pre-existing wrongness excluded"      "yes" "$(grep -qF 'already wrong before this diff' /tmp/re_code.txt && echo yes || echo no)"
 t "READMEs are evidence, not scope"      "yes" "$(grep -qF 'evidence, never report scope' /tmp/re_code.txt && echo yes || echo no)"
 
@@ -39,7 +39,7 @@ t "reviewer labels them as evidence, not subject" "yes" \
 
 # ---------- The attachment loop ----------
 t "code-mode only"                       "yes" \
-  "$(grep -B2 -F 'for rf in README.md README.ja.md; do' /tmp/re_run.sh | grep -qF 'if [ "$DOCS_MODE" != "1" ]; then' && echo yes || echo no)"
+  "$(grep -B3 -F 'for rf in README.md README.ja.md; do' /tmp/re_run.sh | grep -qF '[ "$DOCS_MODE" != "1" ]; then' && echo yes || echo no)"
 t "a README already attached as a changed file is not re-sent" "yes" \
   "$(grep -qF 'grep -qxF "$rf" attached.txt && continue' /tmp/re_run.sh && echo yes || echo no)"
 t "...checked against the ROUND list, not the whole PR" "no" \
@@ -64,8 +64,13 @@ t "...and the record cannot fail the job" "yes" \
   "$(grep -F '>> attached.txt' /tmp/re_run.sh | grep -qF '|| true' && echo yes || echo no)"
 t "own budget, not the changed-file pool" "yes" \
   "$(grep -qF 'README_TOTAL_CAP - readme_total' /tmp/re_run.sh && echo yes || echo no)"
-t "...and not a FILE_COUNT_CAP slot"      "no" \
-  "$(sed -n '/for rf in README.md/,/^          fi$/p' /tmp/re_run.sh | grep -qF 'FILE_COUNT_CAP' && echo yes || echo no)"
+# A negative check on an extracted range passes vacuously when the range
+# stops matching, so the extraction is asserted on its own first — the
+# failure mode CLAUDE.md documents.
+sed -n '/for rf in README.md/,/^          fi$/p' /tmp/re_run.sh > /tmp/re_loop.txt
+t "the README loop is extractable"        "yes" "$([ -s /tmp/re_loop.txt ] && echo yes || echo no)"
+t "...and really is the loop"             "yes" "$(grep -qF 'README_TOTAL_CAP' /tmp/re_loop.txt && echo yes || echo no)"
+t "...and not a FILE_COUNT_CAP slot"      "no"  "$(grep -qF 'FILE_COUNT_CAP' /tmp/re_loop.txt && echo yes || echo no)"
 t "TRUNCATED is decided on what the cap clamped" "yes" \
   "$(grep -qF 'if [ "$rdclamped" -lt "$rdsize" ]; then' /tmp/re_run.sh && echo yes || echo no)"
 t "a 404 is absence, anything else warns" "yes" \
@@ -74,6 +79,18 @@ t "...and the fetch status is captured, not discarded" "yes" \
   "$(grep -qF '2>rderr.txt) || rdstatus=$?' /tmp/re_run.sh && echo yes || echo no)"
 t "the count is observable"               "yes" \
   "$(grep -qF 'readmes=${readme_n} (${readme_total}B)' /tmp/re_run.sh && echo yes || echo no)"
+# README documents the notice by quoting its opening; appending rather
+# than prepending is what keeps that quote true.
+t "...without falsifying the documented prefix" "yes" \
+  "$(grep -qF 'ai-review context: docs_mode=' ../README.md && grep -qF '::notice::ai-review context: docs_mode=' /tmp/re_run.sh && echo yes || echo no)"
+t "callers can turn README evidence off"  "yes" \
+  "$(grep -qF 'AI_REVIEW_DISABLE_README' "$ENGINE" && grep -qF '[ -z "${DISABLE_README:-}" ] || readme_on=0' /tmp/re_run.sh && echo yes || echo no)"
+t "...and both READMEs document that switch" "yes" \
+  "$(grep -qF 'AI_REVIEW_DISABLE_README' ../README.md && grep -qF 'AI_REVIEW_DISABLE_README' ../README.ja.md && echo yes || echo no)"
+t "the verifier frames the README independently of the changed files" "yes" \
+  "$(awk '/if \[ -s readmes.txt \]; then/ {n++} n == 2 && /never/ {found = 1} END {exit !found}' /tmp/re_run.sh && echo yes || echo no)"
+t "the carve-out says which line to anchor on" "yes" \
+  "$(grep -qF 'ANCHOR it on the diff line' /tmp/re_run.sh && echo yes || echo no)"
 
 # ---------- Caps tuned before REVIEW.md existed ----------
 t "both modes cap findings at the same number" "2" "$(grep -c 'Report at most 5 findings, most severe first' /tmp/re_run.sh)"
