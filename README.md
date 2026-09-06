@@ -63,9 +63,10 @@ engine:
    against its real signature instead of guessed at. Resolution is
    syntactic (there is no checkout): relative imports first, then
    absolute imports anchored on the changed paths' own package roots,
-   and a repository-root / `src/` fallback that is always tried behind
-   them — so a tests-only PR still finds its subject, and a `tests/pkg/`
-   package cannot hide `src/pkg/`.
+   and a fallback — repository root, `src/`, and the importing file's own
+   directory — that is always tried behind them, so a tests-only PR still
+   finds its subject, a `tests/pkg/` package cannot hide `src/pkg/`, and a
+   script's `import util` finds `scripts/util.py`.
    Forward direction only — callers of the changed code are not found,
    and the prompt tells the model not to read their absence as evidence.
    Same deny-list and byte budget as the changed files, plus a slot cap

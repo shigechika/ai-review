@@ -862,10 +862,13 @@ jobs:
           #      -> src/pkg/core.py). ALL such roots are kept, not the first
           #      seen — tests/pkg/test_core.py must not hide src/pkg/;
           #   3. every non-stdlib absolute import, anchored or not, is also
-          #      tried at the repo root and under src/ (behind the anchored
-          #      candidates) — the tests-only PR shape with no other anchor,
-          #      and the nested-tests layout above (both found by this
-          #      engine reviewing its own change, R1F1 on PR #60).
+          #      tried at the repo root, under src/, and in the importing
+          #      file own directory (behind the anchored candidates) — the
+          #      tests-only PR shape with no other anchor, the nested-tests
+          #      layout above (both found by this engine reviewing its own
+          #      change, R1F1 on PR #60), and a script run as
+          #      `python scripts/main.py`, whose `import util` means
+          #      scripts/util.py (codex review of PR #60).
           # For each module both mod.py and mod/__init__.py are tried; a
           # lower-case imported name is also tried as a submodule, again in
           # both forms (from pkg import helpers -> pkg/helpers.py and
@@ -929,6 +932,7 @@ jobs:
               for (k = 1; k <= nroots[top]; k++) emit_module(2, 1, rootpre[top, k] modpath(mod), names, nn)
               emit_module(3, 1, modpath(mod), names, nn)
               emit_module(3, 2, "src/" modpath(mod), names, nn)
+              if (dir != "") emit_module(3, 1, dir modpath(mod), names, nn)
             }
             function emit_bare(tier, rdir, names, nn,   k) {
               for (k = 1; k <= nn; k++) if (names[k] ~ /^[a-z_][a-z0-9_]*$/) { add(tier, 1, rdir names[k] ".py"); add(tier, 3, rdir names[k] "/__init__.py") }

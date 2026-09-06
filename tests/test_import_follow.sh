@@ -61,7 +61,9 @@ t "list-anchored: pkg root found via prfiles" "yes" "$(has src/pkg/core.py)"
 resolve tests/test_mod.py 'import other_pkg.thing' > /tmp/pic_out.txt
 t "fallback: repo root"                      "yes" "$(has other_pkg/thing.py)"
 t "fallback: src/"                           "yes" "$(has src/other_pkg/thing.py)"
-t "fallback: exactly 4 candidates"           "4"   "$(wc -l < /tmp/pic_out.txt | tr -d ' ')"
+# root, src/ and the importing file directory (tests/), .py + __init__ each
+t "fallback: importing file directory"       "yes" "$(has tests/other_pkg/thing.py)"
+t "fallback: exactly 6 candidates"           "6"   "$(wc -l < /tmp/pic_out.txt | tr -d ' ')"
 
 # ---------- Selftest findings on PR #60 ----------
 # R1F1: a nested tests package (tests/pkg/test_core.py) anchored `pkg`
@@ -82,6 +84,19 @@ printf 'src/pkg/mod.py\ntests/test_mod.py\n' > /tmp/pic_prfiles.txt
 resolve src/pkg/mod.py 'from app import plugins' > /tmp/pic_out.txt
 t "R1F2: imported name as module"            "yes" "$(has app/plugins.py)"
 t "R1F2: imported name as package"           "yes" "$(has app/plugins/__init__.py)"
+
+# ---------- Script-directory imports (codex review of PR #60) ----------
+# `python scripts/main.py` puts scripts/ on sys.path, so its `import util`
+# means scripts/util.py — a fallback root alongside the repo root and src/.
+printf 'scripts/main.py\n' > /tmp/pic_prfiles.txt
+resolve scripts/main.py 'import util' > /tmp/pic_out.txt
+t "script dir: importing file directory tried"  "yes" "$(has scripts/util.py)"
+t "script dir: repo root still tried"            "yes" "$(has util.py)"
+t "script dir: both in the first rank"           "yes" \
+  "$([ "$(grep -nxF scripts/util.py /tmp/pic_out.txt | cut -d: -f1)" -lt "$(grep -nxF src/util.py /tmp/pic_out.txt | cut -d: -f1)" ] && echo yes || echo no)"
+resolve main.py 'import util' > /tmp/pic_out.txt
+t "script dir: root file adds no duplicate"      "1"   "$(grep -cxF util.py /tmp/pic_out.txt)"
+printf 'src/pkg/mod.py\ntests/test_mod.py\n' > /tmp/pic_prfiles.txt
 
 # ---------- Noise that must produce nothing ----------
 resolve src/pkg/mod.py $'import os, sys\nfrom typing import Any\n# import commented\nprint("from x import y")\nfrom __future__ import annotations' > /tmp/pic_out.txt
