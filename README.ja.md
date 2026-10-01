@@ -277,7 +277,7 @@ DependabotのPR・同一リポジトリの`release-please--*`ブランチは、�
 | Input | Repository variable | デフォルト値 | 意味 |
 |---|---|---|---|
 | `language` | `AI_REVIEW_LANG` | `en` | 指摘本文の言語（`en`または`ja`）。マーカー・severity・ledgerはどちらの場合も英語のままです。 |
-| `model` | `AI_REVIEW_MODEL` | `gpt-5.6-sol` | エンドポイントに送信するdeployment名。 |
+| `model` | `AI_REVIEW_MODEL` | `gpt-6.1-sol` | エンドポイントに送信するdeployment名。 |
 | `reasoning-effort` | `AI_REVIEW_EFFORT` | `high` | レビュアー呼び出しの`reasoning_effort`。センチネル値`off`を指定するとパラメータ自体を送信しなくなります（空文字列はデフォルト値にフォールバックしてしまうため、offスイッチとしては機能**しません**）。 |
 | — | `AI_REVIEW_VERIFY_EFFORT` | `low` | verifier呼び出しの`reasoning_effort`（同じ`off`センチネルが使えます）。 |
 | — | `AI_REVIEW_IMPORTS` | `false` | `true`にすると、変更ファイルがimportするモジュールを添付します（7を参照）。 |

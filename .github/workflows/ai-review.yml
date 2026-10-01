@@ -123,7 +123,7 @@ name: AI review
 #   workflow `vars.*` resolves against the caller, so every repo keeps its
 #   own settings with no input plumbing):
 #     language              en|ja finding prose       (vars.AI_REVIEW_LANG, en)
-#     model                 deployment name           (vars.AI_REVIEW_MODEL, gpt-5.6-sol)
+#     model                 deployment name           (vars.AI_REVIEW_MODEL, gpt-6.1-sol)
 #     reasoning-effort      reviewer effort           (vars.AI_REVIEW_EFFORT, high)
 #     max-total-file-bytes  attachment budget, changed + imported files (131072)
 #   vars only (no input):
@@ -159,7 +159,7 @@ on:
         required: false
         default: ""
       model:
-        description: "Deployment name (default: caller repo variable AI_REVIEW_MODEL, then gpt-5.6-sol)"
+        description: "Deployment name (default: caller repo variable AI_REVIEW_MODEL, then gpt-6.1-sol)"
         type: string
         required: false
         default: ""
@@ -195,7 +195,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           ENDPOINT: ${{ secrets.AI_REVIEW_ENDPOINT }}
           API_KEY: ${{ secrets.AI_REVIEW_API_KEY }}
-          MODEL: ${{ inputs.model || vars.AI_REVIEW_MODEL || 'gpt-5.6-sol' }}
+          MODEL: ${{ inputs.model || vars.AI_REVIEW_MODEL || 'gpt-6.1-sol' }}
           # Reasoning effort for the two calls. The reviewer does the hard
           # part; the verifier only judges candidates it is handed, so it
           # runs cheap. The sentinel "off" stops sending the parameter at

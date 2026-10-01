@@ -263,7 +263,7 @@ Everything is optional. Each setting resolves as
 | Input | Repository variable | Default | Meaning |
 |---|---|---|---|
 | `language` | `AI_REVIEW_LANG` | `en` | Language of the finding prose: `en` or `ja`. Markers, severities and the ledger stay in English either way. |
-| `model` | `AI_REVIEW_MODEL` | `gpt-5.6-sol` | Deployment name sent to the endpoint. |
+| `model` | `AI_REVIEW_MODEL` | `gpt-6.1-sol` | Deployment name sent to the endpoint. |
 | `reasoning-effort` | `AI_REVIEW_EFFORT` | `high` | Reviewer `reasoning_effort`. Sentinel `off` stops sending the parameter (an empty value does **not** work — it falls back to the default). |
 | — | `AI_REVIEW_VERIFY_EFFORT` | `low` | Verifier `reasoning_effort` (same `off` sentinel). |
 | — | `AI_REVIEW_IMPORTS` | `false` | `true` attaches the modules the changed files import (see 7). |
