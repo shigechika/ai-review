@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.11.0](https://github.com/shigechika/ai-review/compare/v1.10.0...v1.11.0) (2026-11-18)
+
+
+### Features
+
+* default model to gpt-6.2-sol ([#73](https://github.com/shigechika/ai-review/issues/73)) ([957c081](https://github.com/shigechika/ai-review/commit/957c0811eff0f5e1654a3d4d254496786e5bca11))
+
 ## [1.10.0](https://github.com/shigechika/ai-review/compare/v1.9.1...v1.10.0) (2026-10-01)
 
 
